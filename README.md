@@ -141,7 +141,7 @@ between the search space, the benchmark table and the results.
 | Repository skeleton | done |
 | Configuration space + generator | **done** |
 | Analytic capacity score (NSC / Marchenko–Pastur) | **done** |
-| Resource cost term + combined score | planned |
+| Resource cost term + combined score + ablation | **done** |
 | Benchmark table + black-box evaluator | planned |
 | Search algorithms (random / greedy / resource-aware / exhaustive) | planned |
 | Metrics and figures (regret, rank correlation, Pareto) | planned |

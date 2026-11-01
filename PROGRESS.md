@@ -219,6 +219,97 @@ where the true parameter count can be read from the exported graph.
 
 ---
 
+### Step 3b — Resource cost model and combined analytic score (completed this step)
+
+**Goal.** Complete the "cheap score" so that a configuration can be ranked
+*without being run*: the capacity term answers "how capable is this model",
+the resource term answers "will it fit the deployment constraints".
+
+**Files created**
+
+| File | Purpose |
+|---|---|
+| `src/resource_model.py` | Predicts latency and memory from the configuration: MACs from the analytic spec at resolution `R`, a throughput prior per thread, and a memory baseline |
+| `src/score.py` | Combines capacity × resolution scaling × quantisation retention, minus resource penalties; supports the ablation modes |
+| `scripts/check_score.py` | Enforces the qualitative shape of the model (monotonicity checks) |
+
+**Method.**
+
+1. **Compute cost from the graph.** Every convolution carries its output spatial
+   size once an input resolution is given, so
+
+   ```
+   MACs(model, R) = Σ H_out·W_out·C_out·C_in·k²
+   ```
+
+   Cross-check: `yolov5s @ 640` gives **7.74 GMACs**, and the published figure is
+   16.5 GFLOPs = 8.25 GMACs, so the analytic compute is within ~6% of the
+   reference — an independent confirmation that the architecture spec is right.
+
+2. **Latency / memory prediction.**
+
+   ```
+   latency_ms = MACs / (throughput_per_thread · threads) · 1000 + fixed_overhead
+   memory_mb  = weights + peak_activation + runtime_baseline
+   ```
+
+   The three constants are **priors**, not measurements: they are documented in
+   `ResourceModel` and are refitted by `ResourceModel.fit(...)` once the
+   benchmark table exists. The report must state that the analytic numbers are
+   predictions until calibrated.
+
+3. **Combined score** (the project's adaptation of the Topic C score):
+
+   ```
+   A_hat(x) = C(model) · (R / 640)^alpha · q(precision)
+   S(x)     = A_hat(x)/max A_hat − lam·P_latency(x) − mu·P_memory(x) − soft·(…) 
+   ```
+
+   * `alpha = 1.0` — a larger input resolution feeds the same architecture more
+     spatial evidence, so the usable capacity grows with `R`.
+   * `q(int8) = 0.97` — a small retention penalty for quantisation.
+   * `P_*` are zero inside a hard constraint and grow linearly outside it.
+   * a small `soft_weight` breaks ties toward cheaper configurations when no hard
+     cap is active.
+
+4. **Ablation switch.** `ScoreWeights.ablation ∈ {full, no_resource,
+   no_capacity}` — the same scorer can be run with the resource ingredient
+   removed or the capacity ingredient removed, which is the ablation the topic
+   requires.
+
+**Commands run**
+
+```bash
+python scripts/check_score.py
+```
+
+**Results** (4 threads, FP32)
+
+```text
+config_id                  GMACs   lat(ms)   mem(MB)       proxy    score
+yolov5n_r320_fp32_t4        0.53      41.1      57.9      273.74   0.0342
+yolov5n_r640_fp32_t4        2.12     140.3      62.9      547.48   0.0871
+yolov5s_r320_fp32_t4        1.94     129.0      77.5      950.83   0.1638
+yolov5s_r640_fp32_t4        7.74     492.1      87.3     1901.66   0.3501
+yolov5m_r320_fp32_t4        5.70     364.0     123.1     2462.67   0.4522
+yolov5m_r640_fp32_t4       22.78    1432.0     137.9     4925.35   0.9374
+
+[PASS] latency falls with more threads (1944.2 -> 492.1 ms)
+[PASS] latency rises with resolution (129.0 -> 492.1 ms)
+[PASS] INT8 lowers memory (87.3 -> 59.3 MB)
+[PASS] score rises with model size (0.0871 -> 0.9374)
+[PASS] score rises with resolution (0.1638 -> 0.3501)
+[PASS] resource penalty lowers the score of the heaviest config
+```
+
+**Acceptance criteria met.** The score is computable for all 54 configurations
+from specification alone, is monotone in the directions the modelling assumes,
+and exposes an ablation switch. The predicted latency for `yolov5s @ 640` with 4
+threads (≈490 ms) is in the right order of magnitude for a Raspberry Pi 4, which
+makes the priors usable for the experiments before calibration.
+
+---
+
 ## 4. Repository Map (current)
 
 ```text
@@ -234,12 +325,15 @@ rpi-edge-search/
 ├── models/                         <- model download/export instructions
 ├── results/                        <- generated tables and figures
 ├── scripts/                        <- runnable entry points
-│   └── check_capacity.py           <- capacity validation + variant table
+│   ├── check_capacity.py           <- capacity validation + variant table
+│   └── check_score.py              <- score/resource-model monotonicity checks
 └── src/
     ├── __init__.py
     ├── search_space.py             <- pool enumeration
     ├── model_spec.py               <- analytic YOLOv5n/s/m architecture spec
-    └── nsc.py                      <- Marchenko–Pastur capacity score
+    ├── nsc.py                      <- Marchenko–Pastur capacity score
+    ├── resource_model.py           <- latency / memory prediction
+    └── score.py                    <- combined analytic score + ablation
 ```
 
 ---
@@ -250,8 +344,8 @@ rpi-edge-search/
 |---|---|---|
 | S2 | Configuration search space + generator | **done** |
 | S3 | Analytic scoring model — NSC capacity term | **done** |
-| S3b | Resource cost term (latency/memory prediction from resolution/precision/threads) and the combined score | next |
-| S4 | Benchmark table schema + black-box evaluator (refuses to reveal unmeasured rows) | planned |
+| S3b | Resource cost term + combined score + ablation | **done** |
+| S4 | Benchmark table schema + black-box evaluator (refuses to reveal unmeasured rows) | next |
 | S5 | Search algorithms: random, greedy, resource-aware heuristic, exhaustive oracle | planned |
 | S6 | Metrics & figures: regret, Spearman/Kendall ranking, Pareto fronts, ablation | planned |
 | S7 | One-command reproduction (`scripts/reproduce.py`) | planned |

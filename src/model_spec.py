@@ -4,13 +4,14 @@ The three variants (n / s / m) share one layer topology and differ only in the
 ``depth_multiple`` and ``width_multiple`` scaling factors, exactly as in the
 official Ultralytics configuration files. Building the specification
 analytically keeps the core experiment free of any PyTorch dependency: the
-analytic capacity score only needs the *shape* of every weight matrix.
+analytic capacity score only needs the *shape* of every weight matrix, and the
+resource model only needs the shape and the spatial size of each layer.
 
 Reference topology: Ultralytics YOLOv5 (v7.0), base file ``yolov5s.yaml``,
 blocks expanded as in the reference implementation:
 
-    C3(c1, c2, n) = Conv(c1, c2/2, 1) + Conv(c1, c2/2, 1)
-                    + n * Bottleneck(c2/2, c2/2) + Conv(c2, c2, 1)
+    C3(c1, c2, n)    = Conv(c1, c2/2, 1) + Conv(c1, c2/2, 1)
+                       + n * Bottleneck(c2/2, c2/2) + Conv(c2, c2, 1)
     Bottleneck(c, c) = Conv(c, c, 1) + Conv(c, c, 3)
     SPPF(c1, c2)     = Conv(c1, c2/2, 1) + Conv(4*c2/2, c2, 1)
 
@@ -23,7 +24,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 #: (from, number, module, args) in the order used by the reference YAML.
 BACKBONE: Sequence[Tuple] = (
@@ -74,12 +75,13 @@ def make_divisible(x: float, divisor: int = 8) -> int:
 
 @dataclass(frozen=True)
 class ConvMatrix:
-    """One weight matrix of a convolution: ``(out_channels, in_channels*k*k)``."""
+    """One convolution: its weight matrix and (optionally) its output geometry."""
 
     name: str
     out_channels: int
     in_channels: int
     kernel: int
+    out_hw: Optional[Tuple[int, int]] = None
 
     @property
     def m(self) -> int:
@@ -94,79 +96,124 @@ class ConvMatrix:
         """Weights plus batch-norm affine parameters (Conv has no bias)."""
         return self.out_channels * self.n + 2 * self.out_channels
 
+    @property
+    def macs(self) -> int:
+        """Multiply-accumulate operations for one forward pass (0 if no geometry)."""
+        if self.out_hw is None:
+            return 0
+        height, width = self.out_hw
+        return height * width * self.out_channels * self.n
 
-def _resolve_inputs(frm, outputs: List[int]) -> List[int]:
+    @property
+    def out_elements(self) -> int:
+        """Number of activation elements of this layer's output."""
+        if self.out_hw is None:
+            return 0
+        return self.out_hw[0] * self.out_hw[1] * self.out_channels
+
+
+def _resolve_indices(frm) -> List[int]:
     if isinstance(frm, (list, tuple)):
-        return [outputs[f] for f in frm]
-    return [outputs[frm]]
+        return list(frm)
+    return [frm]
 
 
-def build_variant(variant: str) -> Tuple[List[ConvMatrix], int]:
-    """Return every convolution weight matrix of ``variant`` and the total parameter count."""
+def build_variant(variant: str, input_size: Optional[int] = None) -> Tuple[List[ConvMatrix], int]:
+    """Return the convolution list of ``variant`` and its total parameter count.
+
+    Parameters
+    ----------
+    variant:
+        One of ``yolov5n`` / ``yolov5s`` / ``yolov5m``.
+    input_size:
+        Optional square input resolution. When given, every matrix also carries
+        its output spatial size, so ``ConvMatrix.macs`` and
+        ``ConvMatrix.out_elements`` become meaningful (needed by the resource
+        model).
+    """
     if variant not in VARIANTS:
         raise KeyError(f"unknown variant {variant!r}; known: {sorted(VARIANTS)}")
 
     gd = VARIANTS[variant]["depth"]
     gw = VARIANTS[variant]["width"]
 
-    outputs: List[int] = [3]  # stem input = RGB
+    channels: List[int] = [3]          # stem input = RGB
+    sizes: List[Optional[int]] = [input_size]
     convs: List[ConvMatrix] = []
 
-    def add(out: int, inp: int, k: int, tag: str) -> None:
-        convs.append(ConvMatrix(f"{tag}", out, inp, k))
+    def add(out: int, inp: int, k: int, tag: str, size: Optional[int]) -> None:
+        hw = (size, size) if size is not None else None
+        convs.append(ConvMatrix(tag, out, inp, k, hw))
 
     for index, (frm, repeat, module, args) in enumerate(LAYERS):
-        inputs = _resolve_inputs(frm, outputs)
+        idxs = _resolve_indices(frm)
+        inputs = [channels[i] for i in idxs]
+        sizes_in = [sizes[i] for i in idxs]
         c1 = inputs[0] if len(inputs) == 1 else sum(inputs)
+        size = sizes_in[0]
 
         if module == "Conv":
-            nominal, k = args[0], args[1]
+            nominal, k, stride = args[0], args[1], (args[2] if len(args) > 2 else 1)
             c2 = make_divisible(nominal * gw, 8)
-            add(c2, c1, k, f"{index}.conv")
-            outputs.append(c2)
+            out_size = math.ceil(size / stride) if size is not None else None
+            add(c2, c1, k, f"{index}.conv", out_size)
+            channels.append(c2)
+            sizes.append(out_size)
 
         elif module == "C3":
-            nominal = args[0]
-            c2 = make_divisible(nominal * gw, 8)
+            c2 = make_divisible(args[0] * gw, 8)
             c_ = c2 // 2
             n = max(round(repeat * gd), 1)
-            add(c_, c1, 1, f"{index}.cv1")
-            add(c_, c1, 1, f"{index}.cv2")
+            add(c_, c1, 1, f"{index}.cv1", size)
+            add(c_, c1, 1, f"{index}.cv2", size)
             for b in range(n):
-                add(c_, c_, 1, f"{index}.m.{b}.cv1")
-                add(c_, c_, 3, f"{index}.m.{b}.cv2")
-            add(c2, 2 * c_, 1, f"{index}.cv3")
-            outputs.append(c2)
+                add(c_, c_, 1, f"{index}.m.{b}.cv1", size)
+                add(c_, c_, 3, f"{index}.m.{b}.cv2", size)
+            add(c2, 2 * c_, 1, f"{index}.cv3", size)
+            channels.append(c2)
+            sizes.append(size)
 
         elif module == "SPPF":
-            nominal = args[0]
-            c2 = make_divisible(nominal * gw, 8)
+            c2 = make_divisible(args[0] * gw, 8)
             c_ = c2 // 2
-            add(c_, c1, 1, f"{index}.cv1")
-            add(c2, 4 * c_, 1, f"{index}.cv2")
-            outputs.append(c2)
+            add(c_, c1, 1, f"{index}.cv1", size)
+            add(c2, 4 * c_, 1, f"{index}.cv2", size)
+            channels.append(c2)
+            sizes.append(size)
 
         elif module == "Upsample":
-            outputs.append(c1)
+            factor = args[0]
+            out_size = size * factor if size is not None else None
+            channels.append(c1)
+            sizes.append(out_size)
 
         elif module == "Concat":
-            outputs.append(sum(inputs))
+            channels.append(sum(inputs))
+            sizes.append(size)
 
         elif module == "Detect":
-            nc = int(args[0])
-            na = int(args[1])
+            nc, na = int(args[0]), int(args[1])
+            c_out = na * (nc + 5)
             for level, c_in in enumerate(inputs):
-                # one 1x1 convolution per detection level producing
-                # na * (nc + 5) outputs (box + objectness + class logits)
-                c_out = na * (nc + 5)
-                add(c_out, c_in, 1, f"{index}.cv{level}")
-            outputs.append(na * (nc + 5))
+                add(c_out, c_in, 1, f"{index}.cv{level}", sizes_in[level])
+            channels.append(c_out)
+            sizes.append(size)
 
         else:  # pragma: no cover - defensive
             raise ValueError(f"unsupported module {module!r}")
 
     total_params = sum(c.params for c in convs)
     return convs, total_params
+
+
+def total_macs(convs: Sequence[ConvMatrix]) -> int:
+    """Sum of MACs over all convolutions (requires geometry)."""
+    return sum(c.macs for c in convs)
+
+
+def peak_activation_elements(convs: Sequence[ConvMatrix]) -> int:
+    """Largest intermediate activation tensor, in elements."""
+    return max((c.out_elements for c in convs), default=0)
 
 
 def variant_summary(variant: str) -> Dict[str, object]:
