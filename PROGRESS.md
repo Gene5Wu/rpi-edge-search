@@ -461,6 +461,91 @@ feasible accuracy, regret and feasibility count.
 
 ---
 
+### Step 6 — Metrics, tables and figures (completed this step)
+
+**Goal.** Answer the two questions the course topic asks of a cheap score:
+does it **rank** candidates well, and does it **select** well under a budget?
+Plus the ablation the topic requires.
+
+**Files created**
+
+| File | Purpose |
+|---|---|
+| `src/metrics.py` | `spearman`, `kendall_tau_b` (with tie handling), `regret`, `normalized_regret`, `pareto_front`, `within_tolerance_groups` — NumPy only, no SciPy |
+| `scripts/make_figures.py` | Builds every table and figure from a benchmark table |
+
+**Method.**
+
+1. **Rank correlation.** Every cheap signal — the full score, the two ablations,
+   the capacity term alone, the predicted MACs, latency and memory — is
+   correlated with the **measured** accuracy, latency and memory using
+   Spearman's ρ and Kendall's τb. Ties are handled with average ranks (ρ) and
+   the tau-b tie correction, which matters because configurations share the same
+   accuracy whenever only the thread count changes.
+2. **Pareto front.** Non-dominated points under (maximise accuracy, minimise
+   latency), computed by pairwise domination — 54 configurations make an O(n²)
+   scan cheaper and clearer than a library call.
+3. **Regret curve.** Each algorithm is re-run for budgets 1…12 on a fresh
+   evaluator, and the gap to the exhaustive oracle is plotted.
+4. **Ablation.** `full` vs `no_resource` vs `no_capacity` are correlated side by
+   side, so the report can attribute the signal to an ingredient rather than to
+   the score as a whole.
+
+**Commands run**
+
+```bash
+python scripts/make_figures.py
+python scripts/make_figures.py --max-latency 400
+```
+
+**Results** (synthetic table — pipeline test only)
+
+```text
+        predictor  spearman_vs_accuracy  kendall_vs_accuracy  spearman_vs_latency
+        pred_macs                0.8799               0.6917               0.8877
+  pred_latency_ms                0.7651               0.5796               0.9967
+score_no_resource                0.7465               0.5720               0.8752
+       score_full                0.7457               0.5556               0.8300
+   pred_memory_mb                0.5507               0.3968               0.6730
+    capacity_only                0.5122               0.4019               0.7873
+score_no_capacity               -0.6838              -0.5010              -0.8958
+
+Pareto front (accuracy vs latency): 12 points
+```
+
+**Reading the table.** The negative `score_no_capacity` is the expected
+direction: with the capacity ingredient removed the score only prefers cheap
+configurations, which are exactly the least accurate ones. The capacity term
+therefore carries the accuracy signal, and the resource term carries the
+feasibility signal — which is the claim the ablation is supposed to test.
+
+**An honest observation to carry into the real run.** Under a tight latency cap
+(400 ms) on the synthetic table, `score_full`'s correlation with accuracy turns
+**negative** (−0.42): once nearly every configuration violates the cap, the
+penalty dominates and the score ranks by *violation size* rather than by
+accuracy. That is a property of the penalty form, not of the data, and the
+report should either (a) shrink the penalty scale near the constraint boundary,
+or (b) evaluate the score only on the feasible subset. This is recorded as an
+open issue rather than hidden.
+
+**Outputs written** (regenerated, not committed — `results/` is ignored)
+
+```text
+results/rank_correlation.csv
+results/pareto_accuracy_latency.csv
+results/search_regret.csv
+results/fig_pareto.png
+results/fig_score_vs_accuracy.png
+results/fig_regret.png
+```
+
+**Acceptance criteria met.** All four evaluation artefacts the topic asks for
+exist — ranking correlation with ties, fixed-budget selection with regret,
+Pareto front, and an ablation table — and any of them can be regenerated from a
+benchmark table with one command.
+
+---
+
 ## 4. Repository Map (current)
 
 ```text
@@ -482,7 +567,8 @@ rpi-edge-search/
 │   ├── check_score.py              <- score/resource-model monotonicity checks
 │   ├── make_synthetic_benchmark.py <- placeholder table generator
 │   ├── try_evaluator.py            <- evaluator contract checks
-│   └── run_search.py               <- four-algorithm comparison
+│   ├── run_search.py               <- four-algorithm comparison
+│   └── make_figures.py             <- ranking / Pareto / regret tables and plots
 └── src/
     ├── __init__.py
     ├── search_space.py             <- pool enumeration
@@ -492,7 +578,8 @@ rpi-edge-search/
     ├── score.py                    <- combined analytic score + ablation
     ├── benchmark_table.py          <- table loading and validation
     ├── evaluator.py                <- budgeted black-box evaluator
-    └── search.py                   <- random / greedy / heuristic / exhaustive
+    ├── search.py                   <- random / greedy / heuristic / exhaustive
+    └── metrics.py                  <- spearman, kendall, regret, pareto
 ```
 
 ---
@@ -506,8 +593,8 @@ rpi-edge-search/
 | S3b | Resource cost term + combined score + ablation | **done** |
 | S4 | Benchmark table schema + black-box evaluator | **done** |
 | S5 | Search algorithms: random, greedy, resource-aware heuristic, exhaustive oracle | **done** |
-| S6 | Metrics & figures: regret, Spearman/Kendall ranking, Pareto fronts, ablation | next |
-| S7 | One-command reproduction (`scripts/reproduce.py`) | planned |
+| S6 | Metrics & figures: regret, Spearman/Kendall ranking, Pareto fronts, ablation | **done** |
+| S7 | One-command reproduction (`scripts/reproduce.py`) | next |
 | S8 | Raspberry Pi benchmark script (`scripts/benchmark_pi.py`) | planned |
 | S9 | Four-page final report + ablation study | planned |
 

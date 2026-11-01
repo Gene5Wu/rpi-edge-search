@@ -155,6 +155,23 @@ python scripts/run_search.py --budgets 8 --max-latency 400
 Prints, for each algorithm and budget: evaluated count, best feasible accuracy
 and regret against the exhaustive oracle.
 
+### 6. Generate the tables and figures
+
+```bash
+python scripts/make_figures.py
+```
+
+Writes to `results/`:
+
+| File | Content |
+|---|---|
+| `rank_correlation.csv` | Spearman ρ / Kendall τb of every predictor vs measured accuracy, latency, memory |
+| `pareto_accuracy_latency.csv` | Non-dominated accuracy/latency configurations |
+| `search_regret.csv` | Regret vs budget for random / greedy / heuristic |
+| `fig_pareto.png` | Accuracy vs latency with the Pareto front |
+| `fig_score_vs_accuracy.png` | Analytic score vs measured accuracy |
+| `fig_regret.png` | Regret curves |
+
 ---
 
 ## Status
@@ -167,7 +184,7 @@ and regret against the exhaustive oracle.
 | Resource cost term + combined score + ablation | **done** |
 | Benchmark table + black-box evaluator | **done** |
 | Search algorithms (random / greedy / resource-aware / exhaustive) | **done** |
-| Metrics and figures (regret, rank correlation, Pareto) | planned |
+| Metrics and figures (regret, rank correlation, Pareto) | **done** |
 | One-command reproduction (`scripts/reproduce.py`) | planned |
 | Raspberry Pi benchmark script | planned |
 
