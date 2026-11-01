@@ -546,6 +546,125 @@ benchmark table with one command.
 
 ---
 
+### Step 7 — One-command reproduction (completed this step)
+
+**Goal.** Make the reviewer's job a single command that either passes or fails
+loudly.
+
+**Files created**
+
+| File | Purpose |
+|---|---|
+| `scripts/reproduce.py` | Runs the six pipeline steps in order, times each, and writes `results/reproduce_summary.txt` |
+
+**Method.** Each step runs as a subprocess with its own exit code, so a failure
+stops the run instead of being swallowed; the summary records the Python version,
+the table name and its `source=` counts, per-step status and duration, and an
+explicit warning when the table is synthetic. `--quick` reduces the Monte-Carlo
+sample count, and `--table` switches to the hardware table without touching the
+code.
+
+**Command run**
+
+```bash
+python scripts/reproduce.py
+```
+
+**Results**
+
+```text
+step                              status   seconds
+search space self-test              PASS       0.2
+capacity numerical check            PASS      27.0
+score monotonicity checks           PASS       0.4
+evaluator contract checks           PASS       0.9
+search comparison                   PASS       1.1
+tables and figures                  PASS       1.8
+overall   : PASS      total 31.3s
+```
+
+**Acceptance criteria met.** One command reproduces every artefact on a fresh
+machine in about half a minute, and the summary states plainly that the numbers
+are pipeline verification rather than measurements.
+
+---
+
+### Step 8 — Raspberry Pi benchmark script and model export (completed this step)
+
+**Goal.** Provide the optional path that produces real measurements, without
+making a Raspberry Pi necessary for anyone else.
+
+**Files created**
+
+| File | Purpose |
+|---|---|
+| `scripts/benchmark_pi.py` | Measures median/p95 latency and peak process memory per configuration on ARM; portable peak-RSS reader (Linux `getrusage`, Windows `psapi`), `--dry-run` planning mode |
+| `models/download_models.py` | Optional YOLOv5 → ONNX export with dynamic axes, so one file serves every resolution |
+| `models/README.md` | Explains that models are never committed and what needs them |
+
+**Design decisions.**
+
+* **Accuracy is not measured here.** A fair mAP needs the full COCO evaluation
+  pipeline; mixing it into a timing script invites silently wrong numbers. It is
+  supplied through `--accuracy-json`, and the script **refuses to write a table**
+  without it (unless `--allow-missing-accuracy` is passed, and then the file is
+  not a valid benchmark table).
+* **Thresholds are explicit.** `--num-images`, `--warmup`, `--repeats` are
+  arguments, and the number of timed runs is recorded in the `notes` column.
+* **Naming is fixed.** Files must be `models/{model}_{precision}.onnx`, the same
+  convention the dry run prints.
+
+**Commands run** (no hardware attached, so only the planning paths were executed)
+
+```bash
+python scripts/benchmark_pi.py --dry-run
+python models/download_models.py --dry-run
+```
+
+**Results**
+
+```text
+plan:
+  yolov5n_r320_fp32_t1       <- yolov5n_fp32.onnx (MISSING)
+  yolov5n_r320_int8_t1       <- yolov5n_int8.onnx (MISSING)
+  ... (46 more)
+dry run: nothing measured, nothing written.
+```
+
+**Acceptance criteria met.** The hardware path exists, is documented, fails
+clearly when dependencies or models are missing, and cannot contaminate the
+committed table by accident.
+
+---
+
+### Step 9 — Final report (completed as a draft this step)
+
+**Files created**
+
+| File | Purpose |
+|---|---|
+| `report/final_report.tex` | Four-page report: problem, method, protocol, results, ablation, limitations, reproducibility |
+| `report/final_report.pdf` | Compiled, 4 pages |
+
+**Method.** The report opens with a boxed statement that every numerical table
+comes from the synthetic placeholder and must be replaced before submission, so
+the draft cannot be mistaken for finished results. The results tables are the
+pipeline-verification numbers; the method, protocol, ablation design, limitation
+analysis and reproducibility statement are final.
+
+**Command run**
+
+```bash
+cd report && xelatex -interaction=nonstopmode -halt-on-error final_report.tex
+```
+
+**Results.** `final_report.pdf`, 4 pages, no warnings that affect content.
+
+**Acceptance criteria met.** A complete four-page report exists whose structure
+and claims match the code; only the hardware numbers are missing.
+
+---
+
 ## 4. Repository Map (current)
 
 ```text
@@ -561,14 +680,21 @@ rpi-edge-search/
 │   ├── README.md                   <- table schema and rules
 │   └── synthetic_demo.csv          <- placeholder for pipeline testing only
 ├── models/                         <- model download/export instructions
+│   ├── README.md
+│   └── download_models.py          <- optional ONNX export
+├── report/
+│   ├── final_report.tex            <- four-page report source
+│   └── final_report.pdf            <- compiled report
 ├── results/                        <- generated tables and figures
 ├── scripts/                        <- runnable entry points
+│   ├── reproduce.py                <- one command: the whole pipeline
 │   ├── check_capacity.py           <- capacity validation + variant table
 │   ├── check_score.py              <- score/resource-model monotonicity checks
 │   ├── make_synthetic_benchmark.py <- placeholder table generator
 │   ├── try_evaluator.py            <- evaluator contract checks
 │   ├── run_search.py               <- four-algorithm comparison
-│   └── make_figures.py             <- ranking / Pareto / regret tables and plots
+│   ├── make_figures.py             <- ranking / Pareto / regret tables and plots
+│   └── benchmark_pi.py             <- optional Raspberry Pi measurement script
 └── src/
     ├── __init__.py
     ├── search_space.py             <- pool enumeration
@@ -594,9 +720,9 @@ rpi-edge-search/
 | S4 | Benchmark table schema + black-box evaluator | **done** |
 | S5 | Search algorithms: random, greedy, resource-aware heuristic, exhaustive oracle | **done** |
 | S6 | Metrics & figures: regret, Spearman/Kendall ranking, Pareto fronts, ablation | **done** |
-| S7 | One-command reproduction (`scripts/reproduce.py`) | next |
-| S8 | Raspberry Pi benchmark script (`scripts/benchmark_pi.py`) | planned |
-| S9 | Four-page final report + ablation study | planned |
+| S7 | One-command reproduction (`scripts/reproduce.py`) | **done** |
+| S8 | Raspberry Pi benchmark script + ONNX export | **done** (runs when hardware is attached) |
+| S9 | Four-page final report | **draft** (needs the hardware table) |
 
 ## 6. Open Questions
 
@@ -611,6 +737,32 @@ rpi-edge-search/
    detection head is simplified). Reconcile exactly against the ONNX graphs in
    the benchmark stage and, if the offset turns out to be non-uniform across
    variants, recalibrate the width/depth mapping.
-4. **Pending push.** The commits for Step 2 and Step 3 are local only; the
-   network to `github.com` was unreachable during this session. Push when the
-   connection is back (no further code change is required).
+4. **Pending push.** All commits are local only; the network to `github.com` was
+   unreachable during these sessions. Push when the connection is back — no code
+   change is required.
+
+---
+
+## 7. What remains before submission
+
+Only work that needs the physical device or a decision, not more code.
+
+| # | Task | Notes |
+|---|---|---|
+| 1 | Run `scripts/benchmark_pi.py` on the Raspberry Pi | Fill `benchmarks/pi4b_2gb_reference.csv` (54 rows, or the FP32 subset). |
+| 2 | Supply accuracies via `--accuracy-json` | One mAP@0.5 per (model, resolution, precision); reuse across thread counts. |
+| 3 | Re-run `python scripts/reproduce.py --table benchmarks/pi4b_2gb_reference.csv` | Regenerates every table and figure from real measurements. |
+| 4 | Replace the numbers in `report/final_report.tex` | The structure, method and limitations sections do not change. |
+| 5 | Reconcile the parameter counts | Read the true count from each ONNX graph and compare with the analytic spec (currently ~82%). |
+| 6 | Decide the penalty fix | Under a tight cap the penalty dominates the ranking; either soften it near the boundary or evaluate the score on the feasible subset only. |
+| 7 | `git push` | Nine commits are waiting. |
+
+### What is already finished
+
+Everything that does not need the hardware: the configuration space, the analytic
+capacity score with its numerical validation, the resource model, the composite
+score with two ablations, the benchmark-table contract, the budgeted evaluator,
+the four search algorithms, the ranking/regret/Pareto metrics, the figures, the
+one-command reproduction, the hardware measurement script, and the four-page
+report skeleton. `python scripts/reproduce.py` currently reports **6/6 steps
+PASS** on a synthetic table.

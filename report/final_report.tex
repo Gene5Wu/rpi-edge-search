@@ -1,0 +1,252 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\usepackage{fancyhdr}
+
+\pagestyle{fancy}
+\fancyhead[L]{\small CS5491 AI --- Course Project}
+\fancyhead[R]{\small Resource-Aware Configuration Search}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.45em}
+\setlist[itemize]{itemsep=1pt,topsep=2pt}
+
+\title{\vspace{-1.6cm}\textbf{Resource-Aware Heuristic Search for\\Edge Vision Deployment Configuration Selection}\\[4pt]
+\large Final Report (draft)}
+\author{WU JUNYU \quad 72655994 \quad 72655994@cityu-dg.edu.cn}
+\date{CS5491 Artificial Intelligence}
+
+\begin{document}
+\maketitle
+\vspace{-1.2em}
+
+\begin{tcolorbox}[colback=orange!6,colframe=orange!55!black,title=\textbf{Status of the numbers in this draft}]
+Every numerical table below was produced by the \textbf{pipeline verification run}
+on \texttt{benchmarks/synthetic\_demo.csv}, whose rows carry
+\texttt{source=synthetic}. They demonstrate that the code produces the required
+artefacts; they are \emph{not} measurements and must be replaced by the
+Raspberry Pi table before submission. The commands and the section structure are
+final.
+\end{tcolorbox}
+
+\section{Introduction}
+
+Deploying a vision model on an edge device is a three-way trade-off between
+detection accuracy, inference latency and memory. Which point of that trade-off
+you obtain is determined by the \emph{deployment configuration}: the detector
+variant, the input resolution, the numerical precision and the number of CPU
+threads. Exhaustively benchmarking every candidate is acceptable for a small
+space, but the cost grows quickly, and on a device like a Raspberry Pi each
+measurement is slow.
+
+We therefore treat configuration selection as a \textbf{resource-constrained
+search problem}. Each configuration is an expensive black-box query returning an
+accuracy, a latency and a memory value; only a fixed number of queries is
+affordable; the goal is a feasible configuration of high accuracy.
+
+Our research question is:
+
+\begin{quote}\itshape
+Given a limited number of configuration evaluations, does an analytic,
+resource-aware score select better deployment configurations than random or
+purely data-driven local search?
+\end{quote}
+
+Following the experimental protocol of the course topic \emph{Neural Spectral
+Capacity}~\cite{nsc}, the score is \emph{analytic}: it is computed from the
+configuration specification alone, without running the detector. The topic's
+protocol --- cheap score, rank correlation, fixed-budget selection, ablation ---
+transfers directly; only the objects being scored change, from Transformer
+architectures to deployment configurations.
+
+\section{Method}
+
+\subsection{Configuration space}
+
+A configuration is a point in
+$\{\text{YOLOv5n},\text{YOLOv5s},\text{YOLOv5m}\} \times \{320,416,640\}
+\times \{\text{FP32},\text{INT8}\} \times \{1,2,4\}$, giving 54 candidates
+(27 when restricted to FP32). The space is defined in
+\texttt{configs/search\_space.yaml} and enumerated deterministically, so the
+search cannot drift away from the specification.
+
+Including three model variants is deliberate. The capacity score is an
+\emph{architecture} quantity: if every candidate shared one architecture, the
+score would be constant and could not rank anything.
+
+\subsection{Analytic score}
+
+For a weight matrix $W$ with singular values $\sigma_i$, the reference capacity
+is $\psi(W)=\ln\det(I+W^\top W)=\sum_i \ln(1+\sigma_i^2)$. For i.i.d.\
+$\mathcal{N}(0,s^2)$ entries, the Marchenko--Pastur law gives its expectation
+from the shape $(m,n)$ and the initialisation scale $s$ alone:
+\begin{equation}
+\mathbb{E}[\psi_{\mathrm{MP}}(m,n,s)]
+= \min(m,n)\int \ln\!\big(1+s^2\max(m,n)\lambda\big)\,d\mu_{\gamma}(\lambda),
+\qquad \gamma=\tfrac{\min}{\max}.
+\end{equation}
+The integral is evaluated numerically with the substitution
+$\lambda = a + (b-a)t^2$, which removes the inverse-square-root singularity of
+the MP density at the lower edge --- a plain uniform grid underestimates the
+integral by up to two orders of magnitude for near-square matrices.
+
+The architecture capacity $C(\text{model})$ sums $\psi_{\mathrm{MP}}$ over every
+convolution matrix of the variant. The composite score adds two deployment
+factors and the resource penalties:
+\begin{equation}
+\hat A(x)=C(\text{model})\left(\frac{R}{640}\right)^{\alpha} q(\text{precision}),
+\qquad
+S(x)=\frac{\hat A(x)}{\max \hat A}
+-\lambda P_{\text{lat}}(x)-\mu P_{\text{mem}}(x),
+\end{equation}
+with $\alpha=1$, $q(\text{FP32})=1$, $q(\text{INT8})=0.97$, and $P_\bullet=0$
+inside a constraint, growing linearly outside it.
+
+The resource side is predicted analytically,
+$\text{MACs}=\sum H_{\text{out}}W_{\text{out}}C_{\text{out}}C_{\text{in}}k^2$,
+$\text{latency}=\text{MACs}/(\kappa\cdot\text{threads})+\text{overhead}$,
+$\text{memory}=\text{weights}+\text{peak activation}+\text{runtime baseline}$.
+The three constants are priors and are refitted from measurements by
+\texttt{ResourceModel.fit}.
+
+\subsection{Search algorithms}
+
+The space is a graph in which two configurations are adjacent when they differ
+in exactly one factor by one step. Four methods are compared under an identical
+budget: \textbf{random} sampling; \textbf{greedy} local search that moves to the
+best \emph{measured} neighbour; \textbf{heuristic} best-first search ordered by
+$S(x)$; and \textbf{exhaustive} enumeration as the oracle.
+
+The heuristic never inspects an unmeasured configuration: its ordering comes
+only from $S$, and the evaluator raises an error if an unmeasured row is
+requested.
+
+\section{Experimental protocol}
+
+All methods share one evaluator, one pool and one budget. The evaluator counts
+\emph{distinct} evaluations, so a repeated query is free; this makes the reported
+$n$ the quantity to compare against. Metrics are:
+
+\begin{itemize}
+  \item \textbf{Best feasible accuracy} and \textbf{regret} against the oracle;
+  \item \textbf{Spearman $\rho$} and \textbf{Kendall $\tau_b$} between the score
+        and the measured accuracy, with average ranks and the $\tau_b$ tie
+        correction;
+  \item the \textbf{accuracy--latency Pareto front}.
+\end{itemize}
+
+\section{Results (pipeline verification)}
+
+\subsection{Ranking}
+
+\begin{center}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Predictor & Spearman $\rho$ & Kendall $\tau_b$ \\
+\midrule
+predicted MACs          & 0.880 & 0.692 \\
+predicted latency       & 0.765 & 0.580 \\
+score, no resource term & 0.747 & 0.572 \\
+\textbf{score, full}    & \textbf{0.746} & \textbf{0.556} \\
+predicted memory        & 0.551 & 0.397 \\
+capacity alone          & 0.512 & 0.402 \\
+score, no capacity term & $-$0.684 & $-$0.501 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The sign of the ablation matters more than the magnitudes. Removing the capacity
+term makes the score \emph{anti-correlated} with accuracy: what remains only
+prefers cheap configurations, which are the least accurate ones. The capacity
+term therefore carries the accuracy signal and the resource term carries the
+feasibility signal, which is precisely the claim the ablation is designed to
+test.
+
+\subsection{Selection under a fixed budget}
+
+\begin{center}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Algorithm & Budget & Evaluated & Best accuracy & Regret \\
+\midrule
+random     & 4  & 4  & 0.456 & 0.094 \\
+greedy     & 4  & 4  & 0.431 & 0.120 \\
+heuristic  & 4  & 4  & 0.550 & 0.000 \\
+random     & 12 & 12 & 0.521 & 0.030 \\
+greedy     & 12 & 12 & 0.535 & 0.015 \\
+heuristic  & 12 & 12 & 0.550 & 0.000 \\
+exhaustive & all & 54 & 0.550 & 0.000 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+With a 400\,ms latency cap the picture changes, because feasibility starts to
+bind: at budget 8 the heuristic reaches 0.422 with four feasible configurations
+found, against three for random and two for greedy.
+
+\subsection{Pareto front}
+
+Twelve configurations are non-dominated in accuracy versus latency. The front
+shows the expected staircase: small resolutions give cheap but weak models, and
+the marginal accuracy per additional millisecond falls sharply above roughly
+600\,ms.
+
+\section{Limitations and threats to validity}
+
+\begin{itemize}
+  \item \textbf{Placeholder data.} The tables above come from a synthetic table.
+        The synthetic truth is a smooth function of the same factors the score
+        uses, so the heuristic looks strong here \emph{by construction}; only
+        the hardware table can show genuine rank disagreement.
+  \item \textbf{Simplified architecture model.} The analytic spec reproduces
+        about 82\% of the published parameter counts, because the detection head
+        is modelled as one $1\times1$ convolution per level. The offset is
+        uniform across variants, so it does not reorder them, but it should be
+        reconciled against the ONNX graphs.
+  \item \textbf{Penalty behaviour near the constraint.} Under a tight cap the
+        penalty dominates and the score ranks by violation size rather than by
+        accuracy (observed $\rho=-0.42$). This is a property of the penalty
+        form; the report should either shrink the penalty scale near the
+        boundary or evaluate on the feasible subset only.
+  \item \textbf{Single measurement per configuration.} There are no seed-level
+        repeats, so training-seed uncertainty cannot be estimated; random
+        selection variability is reported separately.
+  \item \textbf{Latency is not resource usage.} The reference FLOP estimate is
+        not measured latency, and peak RSS is not per-inference memory.
+\end{itemize}
+
+\section{Reproducibility statement}
+
+The repository is designed so that a fresh machine can regenerate every table
+and figure:
+
+\begin{verbatim}
+pip install -r requirements.txt
+python scripts/reproduce.py
+\end{verbatim}
+
+This runs the self-tests, the search comparison and the figure generation, and
+writes \texttt{results/reproduce\_summary.txt}. The archived benchmark table is
+committed, so no detector has to be run. Regenerating the measurements on real
+hardware is a separate, explicitly optional step
+(\texttt{scripts/benchmark\_pi.py}) that requires a Raspberry Pi and the optional
+dependencies in \texttt{requirements-benchmark.txt}.
+
+\begin{thebibliography}{9}
+\small
+\bibitem{nsc} Zhu, Zhao and Lu. \emph{Neural Spectral Capacity: Measuring and
+Designing Architectures from Network Specification Alone}.
+\bibitem{lts} Javaheripi et al. \emph{LiteTransformerSearch: Training-free Neural
+Architecture Search for Efficient Language Models}. NeurIPS 2022.
+\bibitem{yolo} Ultralytics. \emph{YOLOv5} (repository and model zoo).
+\bibitem{coco} Lin et al. \emph{Microsoft COCO: Common Objects in Context}. ECCV 2014.
+\bibitem{mp} Marchenko and Pastur. \emph{Distribution of eigenvalues for some sets
+of random matrices}. 1967.
+\bibitem{ort} ONNX Runtime, CPU execution provider.
+\end{thebibliography}
+
+\end{document}

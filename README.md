@@ -2,49 +2,45 @@
 
 CS5491 Artificial Intelligence — Course Project
 
-**Research question.** Given a limited number of configuration evaluations, can a
-resource-aware heuristic identify a high-accuracy edge-vision deployment
-configuration that satisfies latency and memory constraints — without
-exhaustively benchmarking every candidate?
+**Research question.** Given a limited number of configuration evaluations, can an
+analytic resource-aware score select better edge-vision deployment
+configurations than random or purely data-driven local search?
 
 ---
 
 ## Overview
 
 Deploying a vision model on an edge device is a trade-off between detection
-accuracy, inference latency and memory consumption. Which trade-off point you get
-depends on the deployment configuration: the detector variant, the input
-resolution, the numerical precision and the number of CPU threads.
+accuracy, inference latency and memory. The trade-off point is set by the
+**deployment configuration**: detector variant, input resolution, numerical
+precision and CPU thread count.
 
-This project treats **deployment configuration selection as a resource-constrained
-search problem**. Each configuration is an expensive black-box query that returns
-an accuracy, a latency and a memory measurement. Under a fixed evaluation budget
-only a subset of configurations can be queried, and the goal is to find a good
-feasible configuration within that budget.
+This project treats configuration selection as a **resource-constrained search
+problem**. Each configuration is an expensive black-box query; only a fixed
+number can be afforded; the goal is a feasible configuration with high accuracy.
 
-### Two-layer design (why this is reproducible without a Raspberry Pi)
+### Two-layer design
 
 | Layer | What it does | Requirement |
 |---|---|---|
-| **Core — laptop** | Search algorithms, baselines and evaluation run against an **archived benchmark table** (`benchmarks/*.csv`). Each row is a cached black-box evaluation. | Python + 4 packages. No GPU, no Pi. |
-| **Hardware validation — Raspberry Pi 4B / 2 GB** | Regenerates the benchmark table with real measurements and checks that the configurations selected offline behave as predicted on real hardware. | A Raspberry Pi (optional). |
+| **Core — laptop** | Analytic score, search algorithms, metrics and figures run against an **archived benchmark table**. | Python + 4 packages. No GPU, no Pi, no model download. |
+| **Hardware validation — Raspberry Pi 4B / 2 GB** | Regenerates the benchmark table with real measurements. | A Raspberry Pi (optional). |
 
-A reviewer can therefore reproduce **every table and figure** in the report on a
-fresh laptop, and the Raspberry Pi only serves to validate the measurements.
+A reviewer reproduces **every table and figure** on a fresh machine; the Pi only
+regenerates the measurements.
 
 ### Methodological reference
 
-The experimental protocol follows the course topic *Neural Spectral Capacity as a
-Heuristic for Architecture Design*: an analytic, specification-only score is used
-to rank candidates, and is then evaluated against measured outcomes with
-rank correlation and fixed-budget selection.
+The protocol follows the course topic *Neural Spectral Capacity*: a cheap,
+specification-only score ranks candidates, and is then evaluated against measured
+outcomes.
 
 | Topic C | This project |
 |---|---|
-| Analytic capacity score from the architecture spec | Analytic score from the configuration spec (architecture capacity + resource cost) |
-| Spearman ρ / Kendall τb vs. trained perplexity | Spearman ρ / Kendall τb vs. measured accuracy, latency, memory |
+| Analytic capacity score from the architecture spec | Analytic score from the configuration spec (capacity + resource cost) |
+| Spearman ρ / Kendall τb vs. trained perplexity | Spearman ρ / Kendall τb vs. measured accuracy |
 | Fixed-budget selection under a parameter cap; regret | Fixed-budget selection under latency/memory caps; regret vs. exhaustive oracle |
-| Ablation removing the new mechanism | Ablations removing the capacity term / the resource term |
+| Ablation removing the new mechanism | Two ablations: no capacity term, no resource term |
 
 ---
 
@@ -52,73 +48,102 @@ rank correlation and fixed-budget selection.
 
 ```text
 rpi-edge-search/
-├── README.md
-├── PROGRESS.md                  # decision log + step-by-step progress
-├── requirements.txt             # core deps (laptop-only reproduction)
-├── requirements-benchmark.txt   # optional deps to regenerate measurements
+├── README.md                     # this file
+├── PROGRESS.md                   # decision log and step-by-step build record
+├── requirements.txt              # core deps (laptop reproduction)
+├── requirements-benchmark.txt    # optional deps (regenerate measurements)
 ├── configs/
-│   └── search_space.yaml        # single source of truth for the candidate pool
-├── benchmarks/                  # archived benchmark tables (CSV)
-├── models/                      # model download / export instructions
-├── results/                     # generated tables and figures
-├── scripts/                     # runnable entry points
-└── src/                         # library code
-    └── search_space.py          # candidate pool enumeration
+│   └── search_space.yaml         # single source of truth for the pool
+├── benchmarks/
+│   ├── README.md                 # table schema and rules
+│   ├── synthetic_demo.csv        # placeholder, pipeline testing only
+│   └── pi4b_2gb_reference.csv    # real measurements (added after the Pi run)
+├── models/
+│   ├── README.md
+│   └── download_models.py        # optional ONNX export
+├── report/
+│   ├── final_report.tex
+│   └── final_report.pdf
+├── results/                      # generated tables and figures
+├── scripts/
+│   ├── reproduce.py              # one command: everything
+│   ├── check_capacity.py
+│   ├── check_score.py
+│   ├── try_evaluator.py
+│   ├── run_search.py
+│   ├── make_figures.py
+│   ├── make_synthetic_benchmark.py
+│   └── benchmark_pi.py           # optional hardware step
+└── src/
+    ├── search_space.py           # pool enumeration
+    ├── model_spec.py             # analytic YOLOv5n/s/m architecture spec
+    ├── nsc.py                    # Marchenko–Pastur capacity score
+    ├── resource_model.py         # latency / memory prediction
+    ├── score.py                  # combined analytic score + ablation
+    ├── benchmark_table.py        # table loading and validation
+    ├── evaluator.py              # budgeted black-box evaluator
+    ├── search.py                 # random / greedy / heuristic / exhaustive
+    └── metrics.py                # spearman, kendall, regret, pareto
 ```
 
 ---
 
-## Quick start
-
-### 1. Environment
+## Reproducing everything
 
 ```bash
 git clone https://github.com/Gene5Wu/rpi-edge-search.git
 cd rpi-edge-search
 python -m venv .venv
-# Windows: .venv\Scripts\activate
-# Linux/macOS: source .venv/bin/activate
+# Windows:      .venv\Scripts\activate
+# Linux/macOS:  source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-`requirements.txt` deliberately contains only `numpy`, `pandas`, `PyYAML` and
-`matplotlib`, so the core experiment runs on a fresh machine with no GPU and no
-model downloads.
-
-### 2. Enumerate the configuration pool
+Then, with a single command:
 
 ```bash
-python src/search_space.py --stats
+python scripts/reproduce.py
 ```
 
-Expected output:
+This runs, in order:
 
-```text
-Search space summary
-====================
-models      : ['yolov5n', 'yolov5s', 'yolov5m']
-resolution  : [320, 416, 640]
-precision   : ['fp32', 'int8']
-threads     : [1, 2, 4]
-backend     : onnxruntime
-total configs: 54
-per model   : {'yolov5n': 18, 'yolov5s': 18, 'yolov5m': 18}
-per precision: {'fp32': 27, 'int8': 27}
-```
+| Step | What it checks |
+|---|---|
+| 1 | configuration-space self-test (54 unique configurations) |
+| 2 | Marchenko–Pastur capacity against a Monte-Carlo estimate |
+| 3 | score and resource-model monotonicity |
+| 4 | evaluator contract (budget, no peeking) |
+| 5 | four-algorithm search comparison |
+| 6 | rank correlation, Pareto front, regret curve |
 
-Other useful invocations:
+It writes `results/reproduce_summary.txt` with the status and timing of every
+step. Use `--quick` for a faster capacity check, and
+`--table benchmarks/pi4b_2gb_reference.csv` to run against real measurements.
+
+---
+
+## Running the steps individually
 
 ```bash
-python src/search_space.py --self-test          # internal consistency checks
-python src/search_space.py --precision fp32 --stats
-python src/search_space.py --csv configs/configs.csv
-python src/search_space.py --json
+python src/search_space.py --stats               # list the pool
+python scripts/check_capacity.py                 # capacity + Monte-Carlo check
+python scripts/check_score.py                    # score shape checks
+python scripts/try_evaluator.py                  # evaluator contract
+python scripts/run_search.py --budgets 4 8 12    # algorithm comparison
+python scripts/make_figures.py                   # tables and figures -> results/
 ```
 
-### 3. Configuration space
+Add constraints to any of them, e.g.
 
-A configuration is the Cartesian product of the factors defined in
-`configs/search_space.yaml`:
+```bash
+python scripts/run_search.py --budgets 8 --max-latency 400 --max-memory 120
+```
+
+---
+
+## Configuration space
+
+Defined in `configs/search_space.yaml`; nothing is hard-coded in Python.
 
 | Factor | Values |
 |---|---|
@@ -128,49 +153,68 @@ A configuration is the Cartesian product of the factors defined in
 | CPU threads | 1, 2, 4 |
 | Backend | ONNX Runtime (CPU) |
 
-That yields **54** configurations (27 if restricted to FP32). Each configuration
-has a stable identifier such as `yolov5n_r320_fp32_t4`, which is the join key
-between the search space, the benchmark table and the results.
+**54** configurations (27 when restricted to FP32). Each has a stable id such as
+`yolov5n_r320_fp32_t4`, the join key between the space, the benchmark table and
+the results.
 
-### 4. Try the benchmark evaluator
+Three model variants are included on purpose: the capacity score is an
+*architecture* quantity, so a single architecture would make it constant and
+unable to rank anything.
 
-A placeholder benchmark table is included so the pipeline can be exercised
-before real measurements exist. **It is synthetic — never report results derived
-from it.**
+---
 
-```bash
-python scripts/make_synthetic_benchmark.py   # regenerate the placeholder
-python scripts/try_evaluator.py              # check the evaluator contract
-```
+## Outputs
 
-Expected: six `[PASS]` lines, ending with `Checks failed: 0`.
-
-### 5. Run the search comparison
-
-```bash
-python scripts/run_search.py --budgets 4 8 12
-python scripts/run_search.py --budgets 8 --max-latency 400
-```
-
-Prints, for each algorithm and budget: evaluated count, best feasible accuracy
-and regret against the exhaustive oracle.
-
-### 6. Generate the tables and figures
-
-```bash
-python scripts/make_figures.py
-```
-
-Writes to `results/`:
+`scripts/make_figures.py` writes to `results/`:
 
 | File | Content |
 |---|---|
-| `rank_correlation.csv` | Spearman ρ / Kendall τb of every predictor vs measured accuracy, latency, memory |
-| `pareto_accuracy_latency.csv` | Non-dominated accuracy/latency configurations |
-| `search_regret.csv` | Regret vs budget for random / greedy / heuristic |
+| `rank_correlation.csv` | Spearman ρ / Kendall τb of each predictor vs accuracy, latency, memory |
+| `pareto_accuracy_latency.csv` | Non-dominated configurations |
+| `search_regret.csv` | Regret vs budget for every algorithm |
 | `fig_pareto.png` | Accuracy vs latency with the Pareto front |
 | `fig_score_vs_accuracy.png` | Analytic score vs measured accuracy |
 | `fig_regret.png` | Regret curves |
+| `reproduce_summary.txt` | Status and timing of every pipeline step |
+
+`results/` is regenerated and not committed.
+
+---
+
+## Raspberry Pi (optional)
+
+Only needed to regenerate the measurements; the core results never touch a model.
+
+```bash
+# 1. export ONNX (heavy, optional dependencies)
+pip install ultralytics
+python models/download_models.py --variants yolov5n yolov5s yolov5m
+
+# 2. measure on the Pi
+pip install -r requirements-benchmark.txt
+python scripts/benchmark_pi.py --dry-run          # check the plan
+python scripts/benchmark_pi.py \
+    --images-dir data/coco_subset/val \
+    --accuracy-json data/accuracy_map50.json \
+    --out benchmarks/pi4b_2gb_reference.csv
+
+# 3. re-run the analysis on the real table
+python scripts/reproduce.py --table benchmarks/pi4b_2gb_reference.csv
+```
+
+`benchmark_pi.py` measures latency and peak memory. Detection accuracy needs the
+full COCO evaluation pipeline, so it is supplied through `--accuracy-json`
+mapping `"<model>|<resolution>|<precision>"` to mAP@0.5.
+
+---
+
+## Report
+
+`report/final_report.pdf` (four pages) is built from `report/final_report.tex`.
+
+**The numerical tables in the current draft come from the synthetic placeholder
+table** and are labelled as pipeline verification. Replace them with the
+Raspberry Pi results before submission.
 
 ---
 
@@ -178,48 +222,27 @@ Writes to `results/`:
 
 | Component | State |
 |---|---|
-| Repository skeleton | done |
-| Configuration space + generator | **done** |
-| Analytic capacity score (NSC / Marchenko–Pastur) | **done** |
-| Resource cost term + combined score + ablation | **done** |
-| Benchmark table + black-box evaluator | **done** |
-| Search algorithms (random / greedy / resource-aware / exhaustive) | **done** |
-| Metrics and figures (regret, rank correlation, Pareto) | **done** |
-| One-command reproduction (`scripts/reproduce.py`) | planned |
-| Raspberry Pi benchmark script | planned |
+| Configuration space + generator | done |
+| Analytic capacity score (NSC / Marchenko–Pastur) | done |
+| Resource cost model + combined score + ablation | done |
+| Benchmark table contract + black-box evaluator | done |
+| Search algorithms (random / greedy / heuristic / exhaustive) | done |
+| Metrics and figures (regret, rank correlation, Pareto) | done |
+| One-command reproduction | done |
+| Raspberry Pi benchmark script | done (runs when hardware is available) |
+| Final report | draft (needs the hardware table) |
 
-See [`PROGRESS.md`](PROGRESS.md) for the decision log and the detailed,
-step-by-step record of what has been built and how.
+See [`PROGRESS.md`](PROGRESS.md) for the decision log and the detailed record of
+how each piece was built and verified.
 
 ---
 
 ## Reproducibility contract
 
-The repository is organised so that a fresh machine can regenerate the core
-results with two commands:
-
-```bash
-pip install -r requirements.txt
-python scripts/reproduce.py      # (added in a later step)
-```
-
-Guarantees we maintain:
-
 - **No hard-coded parameters.** Every searchable factor lives in `configs/`.
-- **Deterministic.** Fixed random seeds and a deterministic enumeration order.
-- **Archived measurements are committed.** The benchmark table is part of the
-  repository, so search results do not require re-running the detector.
-- **Hardware is optional.** Raspberry Pi measurements are regenerated by a
-  separate, explicitly optional script.
-
----
-
-## Raspberry Pi (optional hardware validation)
-
-```bash
-# On the Raspberry Pi, after installing requirements-benchmark.txt
-python scripts/benchmark_pi.py      # (added in a later step)
-```
-
-This regenerates the benchmark table with real ARM measurements. It is **not**
-required to reproduce the core results.
+- **Deterministic.** Fixed seeds and a deterministic enumeration order.
+- **Archived measurements are committed** (once measured), so the search does not
+  need the detector.
+- **Hardware is optional.** Pi measurements come from a separate script.
+- **Synthetic data is labelled.** Any row with `source=synthetic` is a pipeline
+  test, never a result.
