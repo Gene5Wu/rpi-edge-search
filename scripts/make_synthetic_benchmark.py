@@ -39,13 +39,22 @@ LATENCY_BIAS = {"yolov5n": 0.95, "yolov5s": 1.05, "yolov5m": 1.15}
 INT8_RETENTION = 0.985
 
 
-def synthetic_accuracy(model: str, resolution: int, precision: str) -> float:
-    """Plausible mAP@0.5 curve: rises with size and resolution, dips for INT8."""
+def synthetic_accuracy(model: str, resolution: int, precision: str,
+                       noise: float = 0.0, rng=None) -> float:
+    """Plausible mAP@0.5 curve: rises with size and resolution, dips for INT8.
+
+    ``noise`` adds multiplicative measurement noise. Without it the synthetic
+    truth would be an exact function of the score's own factors, the heuristic
+    would hit the oracle every time, and the comparison would test nothing.
+    """
     ceiling = 0.62
     size = SIZE_FACTOR[model]
     res = 1.0 - np.exp(-resolution / 320.0)
     quant = INT8_RETENTION if precision == "int8" else 1.0
-    return float(ceiling * size * res * quant)
+    value = ceiling * size * res * quant
+    if noise > 0.0 and rng is not None:
+        value *= float(np.exp(rng.normal(0.0, noise)))
+    return float(min(value, 0.999))
 
 
 def main(argv=None) -> int:
@@ -54,6 +63,8 @@ def main(argv=None) -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--noise", type=float, default=0.05,
                         help="log-normal noise on latency and memory")
+    parser.add_argument("--acc-noise", type=float, default=0.03,
+                        help="multiplicative measurement noise on accuracy")
     parser.add_argument("--num-images", type=int, default=500)
     args = parser.parse_args(argv)
 
@@ -78,7 +89,8 @@ def main(argv=None) -> int:
             "precision": config.precision,
             "threads": config.threads,
             "accuracy_map50": round(synthetic_accuracy(config.model, config.resolution,
-                                                       config.precision), 4),
+                                                       config.precision,
+                                                       args.acc_noise, rng), 4),
             "latency_median_ms": round(latency, 2),
             "latency_p95_ms": round(p95, 2),
             "memory_mb": round(memory, 2),

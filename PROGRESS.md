@@ -378,6 +378,89 @@ a finding.
 
 ---
 
+### Step 5 — Search algorithms (completed this step)
+
+**Goal.** Implement the four methods compared in the report, all sharing one
+budget accounting so the comparison is fair.
+
+**Files created**
+
+| File | Purpose |
+|---|---|
+| `src/search.py` | `SearchResult`, neighbour graph, and the four algorithms |
+| `scripts/run_search.py` | Runs every algorithm at several budgets against a table and prints best accuracy + regret |
+
+**Method — the problem stated as a search problem.**
+
+```
+state        = a deployment configuration
+successors   = configurations differing in exactly one factor (one step in the grid)
+cost         = one evaluation from the budget
+goal         = a feasible configuration with high accuracy
+```
+
+The adjacency is derived from the pool itself (a full Cartesian product), so the
+neighbour graph cannot drift away from `configs/search_space.yaml`.
+
+| Algorithm | Rule for choosing the next configuration |
+|---|---|
+| `random` | uniform sample without replacement (black-box baseline) |
+| `greedy` | evaluate the neighbours of the current point, move to the best **measured** one; restart when stuck in a local optimum |
+| `heuristic` | best-first over the frontier, ordered by the **analytic score** (this project's method, and the direct analogue of the Topic C protocol) |
+| `exhaustive` | evaluate everything — the oracle |
+
+**Why the heuristic cannot cheat.** Its ordering comes only from
+`Scorer.score`, which reads the configuration specification. It never inspects a
+measurement for a configuration it has not evaluated; the evaluator would raise
+`NotMeasuredError` if it tried.
+
+**Budget accounting.** Each run gets a *fresh* `Evaluator`, so budgets never leak
+between runs, and `n_evaluated` is reported next to the accuracy so a method can
+never look better by simply spending more.
+
+**Commands run**
+
+```bash
+python scripts/make_synthetic_benchmark.py --seed 0
+python scripts/run_search.py --budgets 4 8 12
+python scripts/run_search.py --budgets 8 --max-latency 400
+```
+
+**Results** (synthetic table — pipeline test only)
+
+```text
+oracle: best feasible accuracy = 0.5503
+
+algorithm     budget  evaluated   best acc    regret  feasible
+random             4          4     0.4561    0.0942         4
+greedy             4          4     0.4306    0.1197         4
+heuristic          4          4     0.5503    0.0000         4
+random             8          8     0.5110    0.0393         8
+greedy             8          8     0.5110    0.0393         8
+heuristic          8          8     0.5503    0.0000         8
+random            12         12     0.5206    0.0297        12
+greedy            12         12     0.5353    0.0150        12
+heuristic         12         12     0.5503    0.0000        12
+exhaustive       all         54     0.5503    0.0000        54
+```
+
+With a 400 ms latency cap the picture changes, because feasibility starts to
+bite: at budget 8 the heuristic reaches 0.4223 with 4 feasible configurations
+found, against 3 for random and 2 for greedy.
+
+**Note on the synthetic numbers.** They are *not* findings. The placeholder truth
+is a smooth function of the same factors the score uses, so the heuristic looks
+strong here by construction. Adding multiplicative measurement noise (default
+3%) keeps the test honest about noise but cannot reproduce the real
+rank-disagreements that make the question interesting — only the hardware table
+can.
+
+**Acceptance criteria met.** All four algorithms run under identical budgets,
+produce comparable `SearchResult` objects, and report evaluated count, best
+feasible accuracy, regret and feasibility count.
+
+---
+
 ## 4. Repository Map (current)
 
 ```text
@@ -398,7 +481,8 @@ rpi-edge-search/
 │   ├── check_capacity.py           <- capacity validation + variant table
 │   ├── check_score.py              <- score/resource-model monotonicity checks
 │   ├── make_synthetic_benchmark.py <- placeholder table generator
-│   └── try_evaluator.py            <- evaluator contract checks
+│   ├── try_evaluator.py            <- evaluator contract checks
+│   └── run_search.py               <- four-algorithm comparison
 └── src/
     ├── __init__.py
     ├── search_space.py             <- pool enumeration
@@ -407,7 +491,8 @@ rpi-edge-search/
     ├── resource_model.py           <- latency / memory prediction
     ├── score.py                    <- combined analytic score + ablation
     ├── benchmark_table.py          <- table loading and validation
-    └── evaluator.py                <- budgeted black-box evaluator
+    ├── evaluator.py                <- budgeted black-box evaluator
+    └── search.py                   <- random / greedy / heuristic / exhaustive
 ```
 
 ---
@@ -420,8 +505,8 @@ rpi-edge-search/
 | S3 | Analytic scoring model — NSC capacity term | **done** |
 | S3b | Resource cost term + combined score + ablation | **done** |
 | S4 | Benchmark table schema + black-box evaluator | **done** |
-| S5 | Search algorithms: random, greedy, resource-aware heuristic, exhaustive oracle | next |
-| S6 | Metrics & figures: regret, Spearman/Kendall ranking, Pareto fronts, ablation | planned |
+| S5 | Search algorithms: random, greedy, resource-aware heuristic, exhaustive oracle | **done** |
+| S6 | Metrics & figures: regret, Spearman/Kendall ranking, Pareto fronts, ablation | next |
 | S7 | One-command reproduction (`scripts/reproduce.py`) | planned |
 | S8 | Raspberry Pi benchmark script (`scripts/benchmark_pi.py`) | planned |
 | S9 | Four-page final report + ablation study | planned |

@@ -145,6 +145,16 @@ python scripts/try_evaluator.py              # check the evaluator contract
 
 Expected: six `[PASS]` lines, ending with `Checks failed: 0`.
 
+### 5. Run the search comparison
+
+```bash
+python scripts/run_search.py --budgets 4 8 12
+python scripts/run_search.py --budgets 8 --max-latency 400
+```
+
+Prints, for each algorithm and budget: evaluated count, best feasible accuracy
+and regret against the exhaustive oracle.
+
 ---
 
 ## Status
@@ -156,7 +166,7 @@ Expected: six `[PASS]` lines, ending with `Checks failed: 0`.
 | Analytic capacity score (NSC / Marchenko–Pastur) | **done** |
 | Resource cost term + combined score + ablation | **done** |
 | Benchmark table + black-box evaluator | **done** |
-| Search algorithms (random / greedy / resource-aware / exhaustive) | planned |
+| Search algorithms (random / greedy / resource-aware / exhaustive) | **done** |
 | Metrics and figures (regret, rank correlation, Pareto) | planned |
 | One-command reproduction (`scripts/reproduce.py`) | planned |
 | Raspberry Pi benchmark script | planned |
