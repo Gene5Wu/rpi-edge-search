@@ -67,6 +67,7 @@ def main(argv=None) -> int:
         ("capacity numerical check", [python, "scripts/check_capacity.py",
                                       "--samples", samples]),
         ("score monotonicity checks", [python, "scripts/check_score.py"] + constraints),
+        ("architecture spec validation", [python, "scripts/check_model_spec.py"]),
         ("evaluator contract checks", [python, "scripts/try_evaluator.py",
                                        "--table", table]),
         ("search comparison", [python, "scripts/run_search.py", "--table", table]

@@ -69,6 +69,7 @@ rpi-edge-search/
 │   ├── reproduce.py              # one command: everything
 │   ├── check_capacity.py
 │   ├── check_score.py
+│   ├── check_model_spec.py       # spec vs published params / GFLOPs
 │   ├── try_evaluator.py
 │   ├── run_search.py
 │   ├── make_figures.py
@@ -128,6 +129,7 @@ step. Use `--quick` for a faster capacity check, and
 python src/search_space.py --stats               # list the pool
 python scripts/check_capacity.py                 # capacity + Monte-Carlo check
 python scripts/check_score.py                    # score shape checks
+python scripts/check_model_spec.py               # spec vs published params / GFLOPs
 python scripts/try_evaluator.py                  # evaluator contract
 python scripts/run_search.py --budgets 4 8 12    # algorithm comparison
 python scripts/make_figures.py                   # tables and figures -> results/
@@ -169,7 +171,7 @@ unable to rank anything.
 
 | File | Content |
 |---|---|
-| `rank_correlation.csv` | Spearman ρ / Kendall τb of each predictor vs accuracy, latency, memory |
+| `rank_correlation.csv` | Spearman ρ / Kendall τb of each predictor vs accuracy, latency, memory — both over the full pool and **restricted to feasible configurations** |
 | `pareto_accuracy_latency.csv` | Non-dominated configurations |
 | `search_regret.csv` | Regret vs budget for every algorithm |
 | `fig_pareto.png` | Accuracy vs latency with the Pareto front |

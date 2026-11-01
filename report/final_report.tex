@@ -1,5 +1,5 @@
 \documentclass[11pt,a4paper]{article}
-\usepackage[margin=2.4cm]{geometry}
+\usepackage[margin=2.1cm]{geometry}
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
 \usepackage{enumitem}
@@ -12,10 +12,10 @@
 \fancyhead[L]{\small CS5491 AI --- Course Project}
 \fancyhead[R]{\small Resource-Aware Configuration Search}
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{0.45em}
-\setlist[itemize]{itemsep=1pt,topsep=2pt}
+\setlength{\parskip}{0.22em}
+\setlist[itemize]{itemsep=0pt,topsep=1pt}
 
-\title{\vspace{-1.6cm}\textbf{Resource-Aware Heuristic Search for\\Edge Vision Deployment Configuration Selection}\\[4pt]
+\title{\vspace{-2.2cm}\textbf{Resource-Aware Heuristic Search for\\Edge Vision Deployment Configuration Selection}\\[4pt]
 \large Final Report (draft)}
 \author{WU JUNYU \quad 72655994 \quad 72655994@cityu-dg.edu.cn}
 \date{CS5491 Artificial Intelligence}
@@ -113,6 +113,28 @@ $\text{memory}=\text{weights}+\text{peak activation}+\text{runtime baseline}$.
 The three constants are priors and are refitted from measurements by
 \texttt{ResourceModel.fit}.
 
+\subsection{Validating the architecture specification}
+
+The analytic spec is checked against the published YOLOv5 figures
+(\texttt{scripts/check\_model\_spec.py}):
+\begin{center}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+Variant & params & ref. & ratio & GFLOPs & ref. & ratio \\
+\midrule
+YOLOv5n & 1.58\,M & 1.90\,M & 0.830 & 4.23 & 4.5  & 0.940 \\
+YOLOv5s & 6.05\,M & 7.20\,M & 0.841 & 15.49 & 16.5 & 0.939 \\
+YOLOv5m & 17.06\,M & 21.20\,M & 0.805 & 45.57 & 49.0 & 0.930 \\
+\bottomrule
+\end{tabular}
+\end{center}
+Compute matches to within 7\% with a nearly identical ratio across variants,
+which is the quantity that drives the latency model. Parameters are under-counted
+by about 19\% uniformly, because the detection head is modelled as a single
+$1\times1$ convolution per level. That deficit is immaterial downstream: the
+capacity score is scale-invariant, and the weights are a small part of the memory
+estimate, which the runtime baseline dominates.
+
 \subsection{Search algorithms}
 
 The space is a graph in which two configurations are adjacent when they differ
@@ -188,6 +210,32 @@ With a 400\,ms latency cap the picture changes, because feasibility starts to
 bind: at budget 8 the heuristic reaches 0.422 with four feasible configurations
 found, against three for random and two for greedy.
 
+\subsection{Ranking under a hard constraint}
+
+Once a constraint binds, the population that matters is the feasible one. At a
+400\,ms cap (22 of 54 configurations feasible):
+
+\begin{center}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Predictor & $\rho$ (all 54) & $\rho$ (feasible only) \\
+\midrule
+predicted MACs          & $0.880$ & $0.853$ \\
+predicted latency       & $0.765$ & $0.590$ \\
+score, no resource term & $0.747$ & $0.641$ \\
+\textbf{score, full}    & $-0.285$ & $\mathbf{0.656}$ \\
+score, no capacity term & $-0.731$ & $-0.373$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+On the full pool the score correlates \emph{negatively} with raw accuracy by
+design: it ranks infeasible configurations last, and accuracy does not care about
+the cap. Restricted to deployable configurations it recovers $\rho=0.66$ and
+edges out the resource-free variant ($0.641$). Clamping each violation penalty at
+one unit moved the full-pool figure from $-0.42$ to $-0.29$; the clamp is a
+documented modelling choice, not a tuned parameter.
+
 \subsection{Pareto front}
 
 Twelve configurations are non-dominated in accuracy versus latency. The front
@@ -203,15 +251,16 @@ the marginal accuracy per additional millisecond falls sharply above roughly
         uses, so the heuristic looks strong here \emph{by construction}; only
         the hardware table can show genuine rank disagreement.
   \item \textbf{Simplified architecture model.} The analytic spec reproduces
-        about 82\% of the published parameter counts, because the detection head
-        is modelled as one $1\times1$ convolution per level. The offset is
-        uniform across variants, so it does not reorder them, but it should be
-        reconciled against the ONNX graphs.
-  \item \textbf{Penalty behaviour near the constraint.} Under a tight cap the
-        penalty dominates and the score ranks by violation size rather than by
-        accuracy (observed $\rho=-0.42$). This is a property of the penalty
-        form; the report should either shrink the penalty scale near the
-        boundary or evaluate on the feasible subset only.
+        about 80--84\% of the published parameter counts and 93--94\% of the
+        published GFLOPs. The compute match validates the part that drives the
+        latency prediction; the parameter deficit is uniform, so it does not
+        reorder the variants.
+  \item \textbf{Rank correlation under a constraint.} Away from any cap the
+        score ranks the pool well, but once a hard cap binds its correlation with
+        raw accuracy over the \emph{full} pool is negative by construction, since
+        it deliberately demotes infeasible configurations. Correlation must be
+        reported on the feasible subset, alongside regret; the full-pool figure
+        is not a meaningful statistic there.
   \item \textbf{Single measurement per configuration.} There are no seed-level
         repeats, so training-seed uncertainty cannot be estimated; random
         selection variability is reported separately.
@@ -237,16 +286,18 @@ hardware is a separate, explicitly optional step
 dependencies in \texttt{requirements-benchmark.txt}.
 
 \begin{thebibliography}{9}
+\setlength{\itemsep}{0pt}
 \small
 \bibitem{nsc} Zhu, Zhao and Lu. \emph{Neural Spectral Capacity: Measuring and
 Designing Architectures from Network Specification Alone}.
-\bibitem{lts} Javaheripi et al. \emph{LiteTransformerSearch: Training-free Neural
-Architecture Search for Efficient Language Models}. NeurIPS 2022.
-\bibitem{yolo} Ultralytics. \emph{YOLOv5} (repository and model zoo).
-\bibitem{coco} Lin et al. \emph{Microsoft COCO: Common Objects in Context}. ECCV 2014.
+\bibitem{lts} Javaheripi et al. \emph{LiteTransformerSearch: Training-free NAS for
+Efficient Language Models}. NeurIPS 2022.
+\bibitem{yolo} Ultralytics. \emph{YOLOv5}.
+\bibitem{coco} Lin et al. \emph{Microsoft COCO}. ECCV 2014.
 \bibitem{mp} Marchenko and Pastur. \emph{Distribution of eigenvalues for some sets
 of random matrices}. 1967.
 \bibitem{ort} ONNX Runtime, CPU execution provider.
 \end{thebibliography}
 
 \end{document}
+

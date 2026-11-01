@@ -57,6 +57,11 @@ class ScoreWeights:
     #: Weight of the *soft* resource pressure (tie-break between equally capable
     #: configurations when no hard cap is active).
     soft_weight: float = 0.05
+    #: Upper bound applied to each violation penalty. Without it, a configuration
+    #: that misses the cap by 10x contributes a penalty of 10 and swamps the
+    #: accuracy term, so the score ranks by *violation size* instead of by
+    #: accuracy. Clamping keeps the penalty a hint rather than a dictator.
+    penalty_cap: float = 1.0
     #: Ablation switch: "full", "no_resource", or "no_capacity".
     ablation: str = "full"
 
@@ -126,6 +131,12 @@ class Scorer:
             memory_penalty = max(0.0, memory - self.max_memory_mb) / self.max_memory_mb
         else:
             memory_penalty = 0.0
+
+        cap = self.weights.penalty_cap
+        if cap is not None:
+            latency_penalty = min(latency_penalty, cap)
+            memory_penalty = min(memory_penalty, cap)
+
         # Soft pressure toward cheaper configurations even without hard caps,
         # so that the score still ranks inside a model variant.
         soft_latency = latency / max(self._reference["max_latency"], 1e-9)

@@ -59,12 +59,13 @@ HEAD: Sequence[Tuple] = (
 
 LAYERS: Sequence[Tuple] = BACKBONE + HEAD
 
-#: depth_multiple, width_multiple, and the reference parameter count (millions)
-#: reported by the official Ultralytics YOLOv5 model table.
+#: depth_multiple, width_multiple, and the reference figures published by the
+#: official Ultralytics YOLOv5 model table: parameters (millions) and GFLOPs at
+#: a 640-pixel input.
 VARIANTS: Dict[str, Dict[str, float]] = {
-    "yolov5n": {"depth": 0.33, "width": 0.25, "params_m": 1.9},
-    "yolov5s": {"depth": 0.33, "width": 0.50, "params_m": 7.2},
-    "yolov5m": {"depth": 0.67, "width": 0.75, "params_m": 21.2},
+    "yolov5n": {"depth": 0.33, "width": 0.25, "params_m": 1.9, "gflops": 4.5},
+    "yolov5s": {"depth": 0.33, "width": 0.50, "params_m": 7.2, "gflops": 16.5},
+    "yolov5m": {"depth": 0.67, "width": 0.75, "params_m": 21.2, "gflops": 49.0},
 }
 
 

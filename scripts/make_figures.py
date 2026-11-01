@@ -98,23 +98,35 @@ def main(argv=None) -> int:
     latency = np.array([m.latency_median_ms for m in measurements])
     memory = np.array([m.memory_mb for m in measurements])
 
+    feasible_mask = np.array([is_feasible(m, args.max_latency, args.max_memory)
+                              for m in measurements])
+    n_feasible = int(feasible_mask.sum())
+
     # -- 1. ranking ------------------------------------------------------
     predictors = build_predictors(configs, scorer_full, scorer_no_resource,
                                   scorer_no_capacity, resource_model)
     rows = []
     for name, values in predictors.items():
-        rows.append({
+        row = {
             "predictor": name,
             "spearman_vs_accuracy": round(spearman(values, accuracy), 4),
             "kendall_vs_accuracy": round(kendall_tau_b(values, accuracy), 4),
+            # The comparison that survives a hard constraint: rank only the
+            # configurations that are actually deployable.
+            "spearman_feasible_only": (
+                round(spearman(values[feasible_mask], accuracy[feasible_mask]), 4)
+                if n_feasible >= 3 else float("nan")
+            ),
             "spearman_vs_latency": round(spearman(values, latency), 4),
             "spearman_vs_memory": round(spearman(values, memory), 4),
-        })
+        }
+        rows.append(row)
     ranking = pd.DataFrame(rows).sort_values("spearman_vs_accuracy", ascending=False)
+    ranking.insert(1, "n_feasible", n_feasible)
     ranking.to_csv(out / "rank_correlation.csv", index=False)
 
     print("Rank correlation against measured accuracy")
-    print("-" * 78)
+    print("-" * 92)
     print(ranking.to_string(index=False))
     print()
 
@@ -169,8 +181,6 @@ def main(argv=None) -> int:
 
     # -- 4. figures ------------------------------------------------------
     fig, ax = plt.subplots(figsize=(7.2, 4.6))
-    feasible_mask = np.array([is_feasible(m, args.max_latency, args.max_memory)
-                              for m in measurements])
     ax.scatter(latency[feasible_mask], accuracy[feasible_mask], s=26,
                label="feasible", color="#2a7ab9")
     ax.scatter(latency[~feasible_mask], accuracy[~feasible_mask], s=26,

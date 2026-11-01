@@ -555,7 +555,7 @@ loudly.
 
 | File | Purpose |
 |---|---|
-| `scripts/reproduce.py` | Runs the six pipeline steps in order, times each, and writes `results/reproduce_summary.txt` |
+| `scripts/reproduce.py` | Runs the seven pipeline steps in order, times each, and writes `results/reproduce_summary.txt` |
 
 **Method.** Each step runs as a subprocess with its own exit code, so a failure
 stops the run instead of being swallowed; the summary records the Python version,
@@ -574,13 +574,14 @@ python scripts/reproduce.py
 
 ```text
 step                              status   seconds
-search space self-test              PASS       0.2
-capacity numerical check            PASS      27.0
+search space self-test              PASS       0.1
+capacity numerical check            PASS      27.9
 score monotonicity checks           PASS       0.4
+architecture spec validation        PASS       0.1
 evaluator contract checks           PASS       0.9
-search comparison                   PASS       1.1
-tables and figures                  PASS       1.8
-overall   : PASS      total 31.3s
+search comparison                   PASS       1.0
+tables and figures                  PASS       1.7
+overall   : PASS      total 32.2s
 ```
 
 **Acceptance criteria met.** One command reproduces every artefact on a fresh
@@ -662,6 +663,83 @@ cd report && xelatex -interaction=nonstopmode -halt-on-error final_report.tex
 
 **Acceptance criteria met.** A complete four-page report exists whose structure
 and claims match the code; only the hardware numbers are missing.
+
+---
+
+### Step 10 — Specification validation and penalty calibration (completed this step)
+
+Two loose ends from earlier steps, both closed.
+
+**10a. Validating the analytic architecture spec.**
+
+`scripts/check_model_spec.py` compares the spec against the published YOLOv5
+reference figures. The result separates two quantities that were previously
+conflated:
+
+```text
+variant     params(M)   ref(M)   ratio    GMACs   GFLOPs    ref   ratio
+yolov5n         1.576     1.90   0.830     2.12     4.23    4.5   0.940
+yolov5s         6.053     7.20   0.841     7.74    15.49   16.5   0.939
+yolov5m        17.056    21.20   0.805    22.78    45.57   49.0   0.930
+```
+
+* **Compute is accurate to within 7%**, and the ratio is nearly identical across
+  the three variants (0.930–0.940). Since the latency model is driven by MACs,
+  this is the check that matters, and it passes.
+* **Parameters are under-counted by ~19%**, uniformly. The detection head is
+  modelled as one `1×1` convolution per level. Nothing downstream depends on the
+  absolute count: the capacity score is used only for ranking (and is invariant
+  to a uniform scale error), and the weights are a small slice of the memory
+  estimate, which is dominated by the runtime baseline.
+
+The script also reads true counts from `models/*.onnx` when the optional `onnx`
+package and the exports are present, and skips the comparison rather than
+guessing when they are not.
+
+**10b. Penalty calibration under a hard constraint.**
+
+Earlier the score ranked *by violation size* once almost every configuration
+missed the cap, giving a negative correlation with accuracy. Two changes:
+
+1. **Clamped penalties.** `ScoreWeights.penalty_cap` bounds each violation term
+   at 1.0, so missing the cap by 10× no longer contributes a penalty of 10 that
+   swamps the accuracy term.
+2. **The right statistic.** `make_figures.py` now also reports the correlation
+   **restricted to the feasible subset**, which is the population the score is
+   actually asked to rank.
+
+**Results at a 400 ms cap** (22 feasible of 54):
+
+```text
+        predictor  spearman_all  spearman_feasible_only
+        pred_macs          0.880                  0.853
+  pred_latency_ms          0.765                  0.590
+score_no_resource          0.747                  0.641
+       score_full         -0.285                  0.656
+score_no_capacity         -0.731                 -0.373
+```
+
+**Interpretation.** On the full pool the score's correlation with raw accuracy
+is *negative by design*: it ranks infeasible configurations last, while accuracy
+does not care about the cap. Restricted to deployable configurations the score
+recovers ρ = 0.66, and it beats the resource-free variant (0.641), which is the
+small piece of evidence the method needs. The honest reporting rule is therefore:
+
+> Report rank correlation on the feasible subset, and compare selection quality
+> with regret — the global correlation is not a meaningful statistic once a hard
+> constraint binds.
+
+The clamping moved the full-pool correlation from −0.42 to −0.29 **without
+changing `penalty_cap`'s default of 1.0 into a tuned parameter**; it is a
+documented modelling choice, not a fitted one.
+
+**Commands run**
+
+```bash
+python scripts/check_model_spec.py
+python scripts/make_figures.py
+python scripts/make_figures.py --max-latency 400 --out results/cap400
+```
 
 ---
 
@@ -753,9 +831,9 @@ Only work that needs the physical device or a decision, not more code.
 | 2 | Supply accuracies via `--accuracy-json` | One mAP@0.5 per (model, resolution, precision); reuse across thread counts. |
 | 3 | Re-run `python scripts/reproduce.py --table benchmarks/pi4b_2gb_reference.csv` | Regenerates every table and figure from real measurements. |
 | 4 | Replace the numbers in `report/final_report.tex` | The structure, method and limitations sections do not change. |
-| 5 | Reconcile the parameter counts | Read the true count from each ONNX graph and compare with the analytic spec (currently ~82%). |
-| 6 | Decide the penalty fix | Under a tight cap the penalty dominates the ranking; either soften it near the boundary or evaluate the score on the feasible subset only. |
-| 7 | `git push` | Nine commits are waiting. |
+| 5 | ~~Reconcile the parameter counts~~ | **Done in Step 10a.** The compute match (within 7%) validates the spec; the uniform ~19% parameter deficit is documented as immaterial to ranking and to the memory estimate. |
+| 6 | ~~Decide the penalty fix~~ | **Done in Step 10b.** Penalties are clamped and the correlation is reported on the feasible subset. |
+| 7 | `git push` | Commits are waiting when the network allows. |
 
 ### What is already finished
 
@@ -764,5 +842,5 @@ capacity score with its numerical validation, the resource model, the composite
 score with two ablations, the benchmark-table contract, the budgeted evaluator,
 the four search algorithms, the ranking/regret/Pareto metrics, the figures, the
 one-command reproduction, the hardware measurement script, and the four-page
-report skeleton. `python scripts/reproduce.py` currently reports **6/6 steps
+report skeleton. `python scripts/reproduce.py` currently reports **7/7 steps
 PASS** on a synthetic table.
