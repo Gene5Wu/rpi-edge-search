@@ -132,6 +132,19 @@ That yields **54** configurations (27 if restricted to FP32). Each configuration
 has a stable identifier such as `yolov5n_r320_fp32_t4`, which is the join key
 between the search space, the benchmark table and the results.
 
+### 4. Try the benchmark evaluator
+
+A placeholder benchmark table is included so the pipeline can be exercised
+before real measurements exist. **It is synthetic — never report results derived
+from it.**
+
+```bash
+python scripts/make_synthetic_benchmark.py   # regenerate the placeholder
+python scripts/try_evaluator.py              # check the evaluator contract
+```
+
+Expected: six `[PASS]` lines, ending with `Checks failed: 0`.
+
 ---
 
 ## Status
@@ -142,7 +155,7 @@ between the search space, the benchmark table and the results.
 | Configuration space + generator | **done** |
 | Analytic capacity score (NSC / Marchenko–Pastur) | **done** |
 | Resource cost term + combined score + ablation | **done** |
-| Benchmark table + black-box evaluator | planned |
+| Benchmark table + black-box evaluator | **done** |
 | Search algorithms (random / greedy / resource-aware / exhaustive) | planned |
 | Metrics and figures (regret, rank correlation, Pareto) | planned |
 | One-command reproduction (`scripts/reproduce.py`) | planned |

@@ -310,6 +310,74 @@ makes the priors usable for the experiments before calibration.
 
 ---
 
+### Step 4 — Benchmark table contract and black-box evaluator (completed this step)
+
+**Goal.** Turn the archived measurements into a strict interface with three
+guarantees, so that the search algorithms cannot accidentally read an answer
+they have not paid for.
+
+**Files created**
+
+| File | Purpose |
+|---|---|
+| `benchmarks/README.md` | The table schema and the rules that make it trustworthy |
+| `src/benchmark_table.py` | Loads and validates a table (required columns, duplicate ids, negative values, ids outside the search space) |
+| `src/evaluator.py` | Budgeted black box: `evaluate()`, `can_evaluate()`, query log, `NotMeasuredError`, `BudgetExhausted`, `is_feasible()` |
+| `scripts/make_synthetic_benchmark.py` | Generates a clearly-labelled placeholder table so the pipeline can be developed before the hardware run |
+| `scripts/try_evaluator.py` | Encodes the evaluator contract as executable checks |
+
+**Method — the three guarantees.**
+
+1. **No peeking.** `evaluate()` on a configuration with no archived row raises
+   `NotMeasuredError` instead of interpolating or guessing.
+2. **Honest budget.** The first query for a configuration consumes one unit; a
+   repeat is free because the outcome is already known. The budget therefore
+   counts *distinct* evaluations, which is exactly the quantity the report
+   compares across algorithms.
+3. **Determinism.** The answer depends only on the table, never on call order.
+
+**Synthetic ground truth is deliberately not the predictor.** The accuracy curve
+uses a different functional form from the analytic score, and the predicted
+latency and memory are multiplied by a per-variant bias and log-normal noise. If
+the placeholder matched the predictor exactly, the "does the heuristic predict
+reality?" analysis would be trivially perfect and would hide bugs.
+
+**Commands run**
+
+```bash
+python scripts/make_synthetic_benchmark.py
+python scripts/try_evaluator.py
+```
+
+**Results**
+
+```text
+wrote 54 synthetic rows to benchmarks/synthetic_demo.csv
+           config_id  accuracy_map50  latency_median_ms  memory_mb
+yolov5n_r320_fp32_t1          0.3214             134.08      57.56
+yolov5n_r320_fp32_t4          0.3214              41.64      60.75
+yolov5n_r320_int8_t4          0.3165              37.61      50.59
+
+table      : synthetic_demo.csv  (54 rows, sources={'synthetic': 54})
+budget     : 5
+[PASS] measured configuration returns a row
+[PASS] budget spent after 5 distinct queries
+[PASS] re-querying a known configuration is free
+[PASS] exceeding the budget raises BudgetExhausted
+[PASS] unmeasured configuration raises NotMeasuredError
+[PASS] query log matches distinct evaluations
+Checks failed: 0
+```
+
+**Acceptance criteria met.** The evaluator enforces the budget and the "no
+peeking" rule, the table loader rejects malformed or foreign rows, and a full
+54-row placeholder table exists so the search and metrics stages can be built
+and tested immediately. `synthetic_demo.csv` is committed for convenience but is
+labelled `source=synthetic`; every result derived from it is a pipeline test, not
+a finding.
+
+---
+
 ## 4. Repository Map (current)
 
 ```text
@@ -322,18 +390,24 @@ rpi-edge-search/
 ├── configs/
 │   └── search_space.yaml           <- single source of truth for the pool
 ├── benchmarks/                     <- archived benchmark tables (CSV)
+│   ├── README.md                   <- table schema and rules
+│   └── synthetic_demo.csv          <- placeholder for pipeline testing only
 ├── models/                         <- model download/export instructions
 ├── results/                        <- generated tables and figures
 ├── scripts/                        <- runnable entry points
 │   ├── check_capacity.py           <- capacity validation + variant table
-│   └── check_score.py              <- score/resource-model monotonicity checks
+│   ├── check_score.py              <- score/resource-model monotonicity checks
+│   ├── make_synthetic_benchmark.py <- placeholder table generator
+│   └── try_evaluator.py            <- evaluator contract checks
 └── src/
     ├── __init__.py
     ├── search_space.py             <- pool enumeration
     ├── model_spec.py               <- analytic YOLOv5n/s/m architecture spec
     ├── nsc.py                      <- Marchenko–Pastur capacity score
     ├── resource_model.py           <- latency / memory prediction
-    └── score.py                    <- combined analytic score + ablation
+    ├── score.py                    <- combined analytic score + ablation
+    ├── benchmark_table.py          <- table loading and validation
+    └── evaluator.py                <- budgeted black-box evaluator
 ```
 
 ---
@@ -345,8 +419,8 @@ rpi-edge-search/
 | S2 | Configuration search space + generator | **done** |
 | S3 | Analytic scoring model — NSC capacity term | **done** |
 | S3b | Resource cost term + combined score + ablation | **done** |
-| S4 | Benchmark table schema + black-box evaluator (refuses to reveal unmeasured rows) | next |
-| S5 | Search algorithms: random, greedy, resource-aware heuristic, exhaustive oracle | planned |
+| S4 | Benchmark table schema + black-box evaluator | **done** |
+| S5 | Search algorithms: random, greedy, resource-aware heuristic, exhaustive oracle | next |
 | S6 | Metrics & figures: regret, Spearman/Kendall ranking, Pareto fronts, ablation | planned |
 | S7 | One-command reproduction (`scripts/reproduce.py`) | planned |
 | S8 | Raspberry Pi benchmark script (`scripts/benchmark_pi.py`) | planned |
