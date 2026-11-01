@@ -1,0 +1,6 @@
+# Core dependencies: enough to regenerate every search/analysis result
+# from the archived benchmark table, on a normal laptop, with no GPU.
+numpy>=1.23
+pandas>=2.0
+PyYAML>=6.0
+matplotlib>=3.7

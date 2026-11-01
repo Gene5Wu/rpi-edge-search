@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Downloaded datasets and model weights are never committed.
+data/
+models/*.pt
+models/*.onnx
+models/*.tflite
+models/*.ncnn
+
+# Generated artefacts (the archived benchmark table IS committed).
+results/*
+!results/.gitkeep
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

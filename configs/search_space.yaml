@@ -1,0 +1,76 @@
+# CS5491 AI Course Project
+# Deployment configuration space for resource-aware heuristic search.
+
+version: 1
+
+description: >
+  Candidate deployment configurations for a lightweight object detector on an
+  edge device. A configuration is the Cartesian product of
+  (model variant) x (input resolution) x (numerical precision) x (CPU threads).
+  The full space is small enough that exhaustive enumeration gives a true
+  optimum (oracle), which we use to measure search regret under a fixed
+  evaluation budget.
+
+# ---------------------------------------------------------------------------
+# Detector family. All variants share the same architecture family (YOLOv5) so
+# that the Neural Spectral Capacity (NSC) score, which is computed from the
+# architecture specification, can differentiate them.
+# ---------------------------------------------------------------------------
+backend:
+  id: onnxruntime
+  providers:
+    - CPUExecutionProvider
+
+models:
+  - id: yolov5n
+    display: YOLOv5n
+    params_m: 1.9
+    family: yolov5
+    notes: "nano: fastest, lowest accuracy"
+  - id: yolov5s
+    display: YOLOv5s
+    params_m: 7.2
+    family: yolov5
+    notes: "small: middle of the menu"
+  - id: yolov5m
+    display: YOLOv5m
+    params_m: 21.3
+    family: yolov5
+    notes: "medium: slowest, highest accuracy"
+
+# ---------------------------------------------------------------------------
+# Deployment parameters
+# ---------------------------------------------------------------------------
+resolution:
+  - 320
+  - 416
+  - 640
+
+precision:
+  - fp32
+  - int8
+
+threads:
+  - 1
+  - 2
+  - 4
+
+# ---------------------------------------------------------------------------
+# Evaluation defaults (used by the benchmark table and the evaluator).
+# ---------------------------------------------------------------------------
+evaluation:
+  dataset: coco2017_val_subset
+  num_images: 500
+  split_seed: 0
+  metrics:
+    - accuracy_map50
+    - latency_ms
+    - memory_mb
+
+# ---------------------------------------------------------------------------
+# Default resource constraints. `null` means "not constrained".
+# Overridden from the command line in experiments.
+# ---------------------------------------------------------------------------
+constraints:
+  max_latency_ms: null
+  max_memory_mb: null

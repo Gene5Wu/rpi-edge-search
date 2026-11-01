@@ -1,0 +1,6 @@
+# OPTIONAL dependencies, only needed to *regenerate* hardware measurements
+# (scripts/benchmark_pi.py). The core experiments and every figure/table in
+# the report can be reproduced from the archived benchmark table without these.
+onnxruntime>=1.16
+opencv-python>=4.8
+pycocotools>=2.0.7
