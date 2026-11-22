@@ -50,6 +50,10 @@ def main(argv=None) -> int:
                         help="use fewer Monte-Carlo samples (faster)")
     parser.add_argument("--max-latency", type=float, default=None)
     parser.add_argument("--max-memory", type=float, default=None)
+    parser.add_argument("--precisions", nargs="+", default=None,
+                        help="restrict every step to these precisions, e.g. fp32")
+    parser.add_argument("--seeds", type=int, default=30,
+                        help="number of random seeds for the multi-seed comparison")
     args = parser.parse_args(argv)
 
     python = sys.executable
@@ -62,6 +66,10 @@ def main(argv=None) -> int:
     if args.max_memory is not None:
         constraints += ["--max-memory", str(args.max_memory)]
 
+    precision_filter = []
+    if args.precisions:
+        precision_filter = ["--precisions"] + list(args.precisions)
+
     steps = [
         ("search space self-test", [python, "src/search_space.py", "--self-test"]),
         ("capacity numerical check", [python, "scripts/check_capacity.py",
@@ -69,11 +77,15 @@ def main(argv=None) -> int:
         ("score monotonicity checks", [python, "scripts/check_score.py"] + constraints),
         ("architecture spec validation", [python, "scripts/check_model_spec.py"]),
         ("evaluator contract checks", [python, "scripts/try_evaluator.py",
-                                       "--table", table]),
+                                       "--table", table] + precision_filter),
         ("search comparison", [python, "scripts/run_search.py", "--table", table]
-         + constraints),
+         + constraints + precision_filter),
         ("tables and figures", [python, "scripts/make_figures.py", "--table", table,
-                                "--out", args.out] + constraints),
+                                "--out", args.out] + constraints + precision_filter),
+        ("multi-seed comparison", [python, "scripts/run_multiseed.py", "--table", table,
+                                   "--seeds", str(args.seeds),
+                                   "--out", str(Path(args.out) / "multiseed.csv")]
+         + constraints + precision_filter),
     ]
 
     print("=" * 78)

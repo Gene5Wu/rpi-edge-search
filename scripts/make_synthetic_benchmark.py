@@ -66,11 +66,13 @@ def main(argv=None) -> int:
     parser.add_argument("--acc-noise", type=float, default=0.03,
                         help="multiplicative measurement noise on accuracy")
     parser.add_argument("--num-images", type=int, default=500)
+    parser.add_argument("--precisions", nargs="+", default=None,
+                        help="restrict the table to these precisions, e.g. fp32")
     args = parser.parse_args(argv)
 
     rng = np.random.default_rng(args.seed)
     space = load_space()
-    configs = enumerate_configs(space)
+    configs = enumerate_configs(space, precisions=args.precisions)
     resource = ResourceModel()
 
     rows = []

@@ -32,7 +32,7 @@ import pandas as pd  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from benchmark_table import BenchmarkTable  # noqa: E402
+from benchmark_table import BenchmarkTable, split_by_coverage  # noqa: E402
 from evaluator import Evaluator, is_feasible  # noqa: E402
 from metrics import kendall_tau_b, pareto_front, regret, spearman  # noqa: E402
 from score import ScoreWeights, Scorer  # noqa: E402
@@ -69,17 +69,32 @@ def main(argv=None) -> int:
     parser.add_argument("--max-memory", type=float, default=None)
     parser.add_argument("--max-budget", type=int, default=12)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--precisions", nargs="+", default=None,
+                        help="restrict to these precisions, e.g. --precisions fp32 "
+                             "(the FP32-only campaign is a valid benchmark)")
     args = parser.parse_args(argv)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
     space = load_space()
-    configs = enumerate_configs(space)
-    table = BenchmarkTable(args.table, known_config_ids=[c.config_id for c in configs])
+    all_configs = enumerate_configs(space, precisions=args.precisions)
+    table = BenchmarkTable(args.table, known_config_ids=[c.config_id for c in all_configs])
 
-    if table.is_synthetic():
+    configs, missing = split_by_coverage(all_configs, table)
+    if not configs:
+        raise SystemExit(
+            f"{table.path.name} contains none of the {len(all_configs)} selected configurations"
+        )
+    if missing:
+        print(f"NOTE: {len(missing)} of {len(all_configs)} configurations have no "
+              f"measurement and are excluded (e.g. {missing[0].config_id}); "
+              f"analysing the {len(configs)} covered configurations.")
+
+    synthetic = table.is_synthetic()
+    if synthetic:
         print("WARNING: synthetic table - the figures demonstrate the pipeline only.\n")
+    data_kind = "simulated" if synthetic else "measured"
 
     from resource_model import ResourceModel
     resource_model = ResourceModel()
@@ -92,8 +107,6 @@ def main(argv=None) -> int:
                                 max_latency_ms=args.max_latency, max_memory_mb=args.max_memory)
 
     measurements = [table.get(c.config_id) for c in configs]
-    if any(m is None for m in measurements):
-        raise SystemExit("the benchmark table does not cover the whole search space")
     accuracy = np.array([m.accuracy for m in measurements])
     latency = np.array([m.latency_median_ms for m in measurements])
     memory = np.array([m.memory_mb for m in measurements])
@@ -125,7 +138,7 @@ def main(argv=None) -> int:
     ranking.insert(1, "n_feasible", n_feasible)
     ranking.to_csv(out / "rank_correlation.csv", index=False)
 
-    print("Rank correlation against measured accuracy")
+    print(f"Rank correlation against {data_kind} accuracy")
     print("-" * 92)
     print(ranking.to_string(index=False))
     print()
@@ -188,9 +201,10 @@ def main(argv=None) -> int:
     front_sorted = sorted(((latency[i], accuracy[i]) for i in front))
     ax.plot([p[0] for p in front_sorted], [p[1] for p in front_sorted],
             color="#c0392b", linewidth=1.6, label="Pareto front")
-    ax.set_xlabel("measured latency (ms)")
-    ax.set_ylabel("measured mAP@0.5")
-    ax.set_title("Accuracy vs latency over the deployment space")
+    ax.set_xlabel(f"{data_kind} latency (ms)")
+    ax.set_ylabel(f"{data_kind} mAP@0.5")
+    ax.set_title(f"Accuracy vs latency ({data_kind} benchmark"
+                 + (", synthetic placeholder)" if synthetic else ")"))
     ax.legend(frameon=False)
     ax.grid(alpha=0.25)
     fig.tight_layout()
@@ -200,9 +214,9 @@ def main(argv=None) -> int:
     fig, ax = plt.subplots(figsize=(6.4, 4.4))
     ax.scatter(predictors["score_full"], accuracy, s=26, color="#2a7ab9")
     ax.set_xlabel("analytic score (full)")
-    ax.set_ylabel("measured mAP@0.5")
+    ax.set_ylabel(f"{data_kind} mAP@0.5")
     rho = spearman(predictors["score_full"], accuracy)
-    ax.set_title(f"Analytic score vs measured accuracy (Spearman rho = {rho:.3f})")
+    ax.set_title(f"Analytic score vs {data_kind} accuracy (Spearman rho = {rho:.3f})")
     ax.grid(alpha=0.25)
     fig.tight_layout()
     fig.savefig(out / "fig_score_vs_accuracy.png", dpi=160)
@@ -214,7 +228,7 @@ def main(argv=None) -> int:
         ax.plot(subset["budget"], subset["regret"], style, markersize=3, label=kind)
     ax.set_xlabel("evaluation budget")
     ax.set_ylabel("regret vs oracle")
-    ax.set_title("Regret against the exhaustive oracle")
+    ax.set_title(f"Regret against the exhaustive oracle ({data_kind} benchmark)")
     ax.legend(frameon=False)
     ax.grid(alpha=0.25)
     fig.tight_layout()

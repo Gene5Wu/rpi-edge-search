@@ -62,6 +62,9 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--models-dir", default=str(REPO_ROOT / "models"))
     parser.add_argument("--resolution", type=int, default=REFERENCE_RESOLUTION)
+    parser.add_argument("--onnx-tolerance", type=float, default=0.25,
+                        help="allowed relative gap between the analytic and ONNX "
+                             "parameter counts before the check fails")
     args = parser.parse_args(argv)
 
     models_dir = Path(args.models_dir)
@@ -103,6 +106,7 @@ def main(argv=None) -> int:
     print()
     print("ONNX exports:")
     found_any = False
+    mismatches = 0
     for variant, params, _ in rows:
         path = models_dir / f"{variant}_fp32.onnx"
         if not path.is_file():
@@ -111,10 +115,15 @@ def main(argv=None) -> int:
         true_count = onnx_parameter_count(path)
         if true_count is None:
             print(f"  {variant}: {path.name} found, but the 'onnx' package is not "
-                  f"installed (pip install onnx)")
-        else:
-            print(f"  {variant}: {path.name} -> {true_count / 1e6:.3f}M "
-                  f"(analytic {params / 1e6:.3f}M, ratio {params / true_count:.3f})")
+                  f"installed (pip install onnx) -- cannot verify")
+            continue
+        ratio = params / true_count
+        ok = abs(1 - ratio) <= args.onnx_tolerance
+        if not ok:
+            mismatches += 1
+        print(f"  {variant}: {path.name} -> {true_count / 1e6:.3f}M "
+              f"(analytic {params / 1e6:.3f}M, ratio {ratio:.3f}) "
+              f"[{'OK' if ok else 'MISMATCH'}]")
     if not found_any:
         print("  none found; run models/download_models.py to create them")
 
@@ -122,6 +131,13 @@ def main(argv=None) -> int:
     print("Verdict: compute matches the reference closely, so the latency model is")
     print("sound; the parameter deficit is uniform and only affects a minor part of")
     print("the memory estimate. The capacity score is scale-invariant in any case.")
+    if mismatches:
+        print()
+        print(f"FAIL: {mismatches} exported model(s) differ from the analytic "
+              f"architecture by more than {args.onnx_tolerance:.0%}.")
+        print("The benchmarked network and the scored network must be the same model;")
+        print("check that models/download_models.py uses the YOLOv5 v7.0 weights.")
+        return 1
     return 0
 
 

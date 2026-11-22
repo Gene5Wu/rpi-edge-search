@@ -21,7 +21,7 @@ from typing import List, Optional
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from benchmark_table import BenchmarkTable  # noqa: E402
+from benchmark_table import BenchmarkTable, split_by_coverage  # noqa: E402
 from evaluator import Evaluator, is_feasible  # noqa: E402
 from score import ScoreWeights, Scorer  # noqa: E402
 from search import (  # noqa: E402
@@ -60,12 +60,24 @@ def main(argv=None) -> int:
                         choices=["full", "no_resource", "no_capacity"],
                         help="ablation mode for the heuristic")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--precisions", nargs="+", default=None,
+                        help="restrict to these precisions, e.g. --precisions fp32")
     args = parser.parse_args(argv)
 
     space = load_space()
-    configs = enumerate_configs(space)
-    known = [c.config_id for c in configs]
+    all_configs = enumerate_configs(space, precisions=args.precisions)
+    known = [c.config_id for c in all_configs]
     table = BenchmarkTable(args.table, known_config_ids=known)
+
+    configs, missing = split_by_coverage(all_configs, table)
+    if not configs:
+        raise SystemExit(
+            f"{table.path.name} contains none of the {len(all_configs)} selected configurations"
+        )
+    if missing:
+        print(f"NOTE: {len(missing)} of {len(all_configs)} configurations have no "
+              f"measurement and are excluded (e.g. {missing[0].config_id}); "
+              f"searching the {len(configs)} covered configurations.\n")
 
     if table.is_synthetic():
         print("WARNING: table is synthetic; results below test the pipeline only.\n")

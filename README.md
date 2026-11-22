@@ -73,6 +73,7 @@ rpi-edge-search/
 │   ├── check_model_spec.py       # spec vs published params / GFLOPs
 │   ├── try_evaluator.py
 │   ├── run_search.py
+│   ├── run_multiseed.py          # mean/std/feasible-success over 30 seeds
 │   ├── make_figures.py
 │   ├── make_synthetic_benchmark.py
 │   └── benchmark_pi.py           # optional hardware step
@@ -171,6 +172,7 @@ This runs, in order:
 | 5 | evaluator contract (budget, no peeking) |
 | 6 | four-algorithm search comparison |
 | 7 | rank correlation, Pareto front, regret curve |
+| 8 | multi-seed comparison (30 seeds) |
 
 It writes `results/reproduce_summary.txt` with the status and timing of every
 step. Use `--quick` for a faster capacity check, and
@@ -188,6 +190,7 @@ python scripts/check_model_spec.py               # spec vs published params / GF
 python scripts/try_evaluator.py                  # evaluator contract
 python scripts/run_search.py --budgets 4 8 12    # algorithm comparison
 python scripts/make_figures.py                   # tables and figures -> results/
+python scripts/run_multiseed.py --seeds 30    # multi-seed distribution
 ```
 
 Add constraints to any of them, e.g.
@@ -263,15 +266,45 @@ python scripts/reproduce.py --table benchmarks/pi4b_2gb_reference.csv
 full COCO evaluation pipeline, so it is supplied through `--accuracy-json`
 mapping `"<model>|<resolution>|<precision>"` to mAP@0.5.
 
+Two details are deliberate:
+
+- **One subprocess per configuration.** `ru_maxrss` is a process-lifetime peak, so
+  measuring several configurations in one process would let a large model inflate
+  every reading after it. Each configuration gets a fresh process.
+- **The `source` column is detected, not assumed.** A laptop run is tagged
+  `laptop`; only a real Pi run is tagged `raspberry_pi_4b`. Override with
+  `--source` if the detection is wrong on your board.
+
+The weights are the **classic YOLOv5 v7.0** checkpoints (`yolov5n.pt`,
+`yolov5s.pt`, `yolov5m.pt`), which is the topology `src/model_spec.py` scores.
+The newer `yolov5nu/su/mu.pt` files are the anchor-free YOLOv5u family and are
+**not** interchangeable here: scoring one model and benchmarking another would
+invalidate the capacity term. `scripts/check_model_spec.py` fails if an
+exported ONNX graph disagrees with the analytic parameter count.
+
+An FP32-only table is a valid benchmark:
+
+```bash
+python scripts/benchmark_pi.py --precisions fp32 --source laptop \
+    --images-dir data/coco_subset/val --accuracy-json data/accuracy_map50.json \
+    --out benchmarks/laptop_fp32.csv
+python scripts/reproduce.py --table benchmarks/laptop_fp32.csv --precisions fp32
+```
+
 ---
 
-## Report
+## Reports
 
-`report/final_report.pdf` (four pages) is built from `report/final_report.tex`.
+| File | Purpose |
+|---|---|
+| `report/milestone_report.pdf` | Three-page milestone report (Times New Roman 12 pt, 2.5 cm margins, single spacing) |
+| `report/final_report.pdf` | Four-page final report draft |
 
-**The numerical tables in the current draft come from the synthetic placeholder
-table** and are labelled as pipeline verification. Replace them with the
-Raspberry Pi results before submission.
+Both are built from the matching `.tex` with `xelatex`.
+
+**The numerical tables in both documents come from the synthetic placeholder
+table** and are labelled as such. Replace them with measured results before
+submission.
 
 ---
 
@@ -285,8 +318,10 @@ Raspberry Pi results before submission.
 | Benchmark table contract + black-box evaluator | done |
 | Search algorithms (random / greedy / heuristic / exhaustive) | done |
 | Metrics and figures (regret, rank correlation, Pareto) | done |
-| One-command reproduction | done |
-| Raspberry Pi benchmark script | done (runs when hardware is available) |
+| One-command reproduction (8 steps) | done |
+| Multi-seed comparison (30 seeds) | done |
+| Hardware benchmark script (per-config subprocess, detected source) | done (runs when hardware is attached) |
+| Milestone report | done (needs measured numbers) |
 | Final report | draft (needs the hardware table) |
 
 See [`PROGRESS.md`](PROGRESS.md) for the decision log and the detailed record of

@@ -145,3 +145,16 @@ class BenchmarkTable:
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
         return (f"BenchmarkTable(path={self.path.name!r}, rows={len(self)}, "
                 f"sources={self.source_counts()})")
+
+
+def split_by_coverage(configs: Iterable, table: "BenchmarkTable"):
+    """Split a configuration list into (measured, not-measured).
+
+    The archive grows incrementally: an FP32-only campaign is a perfectly valid
+    benchmark, so downstream tools must be able to analyse the covered subset
+    instead of demanding that every configuration has a row.
+    """
+    measured, missing = [], []
+    for config in configs:
+        (measured if table.has(config.config_id) else missing).append(config)
+    return measured, missing

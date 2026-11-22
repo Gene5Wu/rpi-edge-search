@@ -34,10 +34,26 @@ from typing import List
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+#: Classic YOLOv5 (v7.0) anchor-based checkpoints.
+#
+# IMPORTANT: these are deliberately the *anchor-based* v7.0 weights, not the
+# newer ``yolov5nu/su/mu.pt`` files. YOLOv5u is a different model family: it is
+# anchor-free, uses a decoupled detection head with a distribution-focal-loss
+# regression branch, and therefore has different layer shapes and a different
+# parameter count.
+#
+# ``src/model_spec.py`` describes the v7.0 topology, and the reference parameter
+# counts used to validate it (1.9M / 7.2M / 21.2M) are v7.0 numbers. The whole
+# capacity score is a function of the convolution shapes, so exporting a YOLOv5u
+# checkpoint would mean scoring a network that is not the one being benchmarked.
+#
+# If you ever switch families, change ``model_spec.py`` too, and re-run
+# ``python scripts/check_model_spec.py`` -- it compares the analytic parameter
+# count against the ONNX graph and fails when they diverge.
 WEIGHTS = {
-    "yolov5n": "yolov5nu.pt",
-    "yolov5s": "yolov5su.pt",
-    "yolov5m": "yolov5mu.pt",
+    "yolov5n": "yolov5n.pt",
+    "yolov5s": "yolov5s.pt",
+    "yolov5m": "yolov5m.pt",
 }
 
 

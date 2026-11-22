@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from evaluator import BudgetExhausted, Evaluator, NotMeasuredError  # noqa: E402
-from benchmark_table import BenchmarkTable  # noqa: E402
+from benchmark_table import BenchmarkTable, split_by_coverage  # noqa: E402
 from search_space import enumerate_configs, load_space  # noqa: E402
 
 
@@ -33,14 +33,25 @@ def main(argv=None) -> int:
     parser.add_argument("--table",
                         default=str(REPO_ROOT / "benchmarks" / "synthetic_demo.csv"))
     parser.add_argument("--budget", type=int, default=5)
+    parser.add_argument("--precisions", nargs="+", default=None,
+                        help="restrict to these precisions, e.g. --precisions fp32")
     args = parser.parse_args(argv)
 
     space = load_space()
-    configs = enumerate_configs(space)
-    known = [c.config_id for c in configs]
+    all_configs = enumerate_configs(space, precisions=args.precisions)
+    known = [c.config_id for c in all_configs]
 
     table = BenchmarkTable(args.table, known_config_ids=known)
     evaluator = Evaluator(table, budget=args.budget)
+
+    configs, missing = split_by_coverage(all_configs, table)
+    if not configs:
+        raise SystemExit(
+            f"{table.path.name} contains none of the {len(all_configs)} selected configurations"
+        )
+    if missing:
+        print(f"NOTE: {len(missing)} of {len(all_configs)} configurations have no "
+              f"measurement and are excluded (e.g. {missing[0].config_id})")
 
     print("=" * 78)
     print(f"table      : {table.path.name}  ({len(table)} rows, sources={table.source_counts()})")

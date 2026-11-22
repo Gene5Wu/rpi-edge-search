@@ -802,6 +802,111 @@ tries it on 3.9.
 
 ---
 
+### Step 12 — Pre-milestone correctness pass (completed this step)
+
+An external review of the repository identified five problems worth fixing before
+the milestone. All five are fixed; no research question, architecture or search
+algorithm was changed.
+
+**12a. FP32-only campaigns could not be analysed.**
+
+`make_figures.py` raised *"the benchmark table does not cover the whole search
+space"* whenever INT8 rows were absent — directly contradicting the plan to
+measure FP32 first. Fixed by adding `split_by_coverage()` to
+`src/benchmark_table.py` and a `--precisions` flag to `reproduce.py`,
+`run_search.py`, `make_figures.py`, `try_evaluator.py` and
+`make_synthetic_benchmark.py`. Tools now analyse the **covered subset** and say so:
+
+```text
+NOTE: 27 of 54 configurations have no measurement and are excluded
+      (e.g. yolov5n_r320_int8_t1); analysing the 27 covered configurations.
+```
+
+Verified with a 27-row FP32 table: `reproduce.py --precisions fp32` reports
+**8/8 PASS**.
+
+**12b. Memory measurement was polluted across configurations; the platform label
+was hard-coded.**
+
+`resource.getrusage(RUSAGE_SELF).ru_maxrss` is a process-lifetime high-water
+mark, so measuring every configuration in one process let a large model inflate
+the reading of everything after it. The script also wrote
+`"source": "raspberry_pi_4b"` unconditionally, which would label laptop
+measurements as Raspberry Pi data.
+
+Fixed: each configuration is measured in **its own subprocess** (`--single-config`
+child mode, results returned as one JSON line), and the source tag is now
+**detected** — `/proc/device-tree/model` on Linux, ARM machine names otherwise —
+with `--source` as an explicit override. On this Windows machine it correctly
+reports `laptop`.
+
+**12c. The analytic architecture and the exported weights were different models.**
+
+`src/model_spec.py` describes the **classic YOLOv5 v7.0** topology (anchor-based),
+while `models/download_models.py` pointed at `yolov5nu/su/mu.pt` — the
+**YOLOv5u** family, which is anchor-free with a decoupled, DFL-based detection
+head. Those are not the same network, and since the capacity score is a function
+of the convolution shapes, the score would have described a model that was never
+benchmarked.
+
+Fixed: the exporter now uses the v7.0 checkpoints (`yolov5n.pt`, `yolov5s.pt`,
+`yolov5m.pt`), with the difference documented at the point of use.
+`scripts/check_model_spec.py` additionally now **fails** (`--onnx-tolerance`,
+default 0.25) when an exported ONNX graph disagrees with the analytic parameter
+count, so the mismatch cannot recur silently.
+
+**12d. No multi-seed experiment.**
+
+Random and greedy were reported from a single seed. Added
+`scripts/run_multiseed.py`: seeds 0–29, mean and standard deviation of the best
+feasible accuracy, regret statistics, and the **feasible-success rate** (a run
+that finds nothing is counted separately rather than as zero regret). The
+heuristic is deterministic and reported once, with ablations.
+
+Result under a 400 ms cap (22 of 54 feasible, oracle 0.4505):
+
+```text
+ budget             algorithm  runs  acc mean  acc std  regret mean  feas. rate
+      4                random    30    0.3944   0.0394       0.0561        0.90
+      4                greedy    30    0.3810   0.0000       0.0695        1.00
+      4        heuristic/full     1    0.4223        -       0.0282        1.00
+      8                random    30    0.4088   0.0328       0.0417        1.00
+      8                greedy    30    0.3952   0.0244       0.0554        1.00
+      8        heuristic/full     1    0.4223        -       0.0282        1.00
+      8 heuristic/no_capacity     1    0.4420        -       0.0085        1.00
+     12                random    30    0.4171   0.0303       0.0334        1.00
+     12                greedy    30    0.4143   0.0307       0.0362        1.00
+     12        heuristic/full     1    0.4223        -       0.0282        1.00
+     12 heuristic/no_capacity     1    0.4505        -       0.0000        1.00
+```
+
+**This is the finding that matters.** The heuristic is never worse than either
+baseline, but its margin over random search at budget 12 is 0.4223 versus 0.4171
+— far smaller than the unconstrained result suggested. More importantly,
+**removing the capacity term reaches the oracle (0.4505)**. On this synthetic
+table the capacity term is therefore not what drives the constrained
+improvement. That is a result about the synthetic benchmark, not about NSC, and
+the milestone reports it as such.
+
+**12e. Figures said "measured" while showing simulated data.**
+
+`make_figures.py` derived a `data_kind` label from the table's `source` column, so
+synthetic runs are now labelled **simulated** in every axis, title and printout,
+and the Pareto figure says *"simulated benchmark, synthetic placeholder"*. A
+reader cannot mistake a pipeline check for a measurement.
+
+**Regression.** `python scripts/reproduce.py` now runs **8 steps** (the multi-seed
+comparison was added to the pipeline) and reports **8/8 PASS** in about 9 s on the
+synthetic table.
+
+**Milestone report.** `report/milestone_report.tex` / `.pdf` — three pages,
+Times New Roman 12 pt, 2.5 cm margins, single spacing. One figure in the original
+draft was wrong (the 400 ms / budget 8 greedy value, 0.3810, is actually 0.4223);
+the results section was rebuilt from the current code and now reports the
+constrained comparison over 30 seeds instead of a single run.
+
+---
+
 ## 4. Repository Map (current)
 
 ```text
