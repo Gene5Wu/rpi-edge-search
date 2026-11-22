@@ -51,6 +51,7 @@ rpi-edge-search/
 ├── README.md                     # this file
 ├── PROGRESS.md                   # decision log and step-by-step build record
 ├── requirements.txt              # core deps (laptop reproduction)
+├── requirements-lock.txt         # exact tested versions
 ├── requirements-benchmark.txt    # optional deps (regenerate measurements)
 ├── configs/
 │   └── search_space.yaml         # single source of truth for the pool
@@ -89,18 +90,71 @@ rpi-edge-search/
 
 ---
 
-## Reproducing everything
+## Environment setup
+
+**Requires Python 3.11+** (tested on 3.11.7; the pinned NumPy needs 3.11).
+
+Use a virtual environment. It is not strictly necessary — if your global Python
+already has the four packages the scripts will run — but it is what makes the
+results reproducible: it proves the code does not silently depend on a package
+that `requirements.txt` forgets to declare.
+
+### 1. Create and activate
 
 ```bash
 git clone https://github.com/Gene5Wu/rpi-edge-search.git
 cd rpi-edge-search
+
 python -m venv .venv
-# Windows:      .venv\Scripts\activate
-# Linux/macOS:  source .venv/bin/activate
-pip install -r requirements.txt
+
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+# Windows Git Bash
+source .venv/Scripts/activate
+# Linux / macOS
+source .venv/bin/activate
 ```
 
-Then, with a single command:
+If PowerShell refuses to run the activation script, either use
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` for the current
+shell only, or skip activation entirely and call the interpreter directly:
+`.\.venv\Scripts\python.exe scripts\reproduce.py`.
+
+### 2. Install dependencies
+
+```bash
+pip install -r requirements.txt        # loose lower bounds, quick start
+# or exact tested versions:
+pip install -r requirements-lock.txt
+```
+
+### 3. Verify
+
+```bash
+python -c "import numpy, pandas, yaml, matplotlib; print('ok')"
+python scripts/reproduce.py
+```
+
+The second command runs the whole pipeline and ends with `overall: PASS`.
+
+`requirements-benchmark.txt` (ONNX Runtime, OpenCV, pycocotools) is **separate on
+purpose** and only needed to regenerate measurements on hardware. Put it in a
+second environment so the core one stays minimal:
+
+```bash
+python -m venv .venv-bench
+# activate it, then:
+pip install -r requirements.txt -r requirements-benchmark.txt
+```
+
+Both `.venv/` and `.venv-bench/` are git-ignored.
+
+---
+
+## Reproducing everything
+
+With the environment from the previous section active, a single command runs the
+whole pipeline:
 
 ```bash
 python scripts/reproduce.py
@@ -113,9 +167,10 @@ This runs, in order:
 | 1 | configuration-space self-test (54 unique configurations) |
 | 2 | Marchenko–Pastur capacity against a Monte-Carlo estimate |
 | 3 | score and resource-model monotonicity |
-| 4 | evaluator contract (budget, no peeking) |
-| 5 | four-algorithm search comparison |
-| 6 | rank correlation, Pareto front, regret curve |
+| 4 | architecture spec vs published params / GFLOPs |
+| 5 | evaluator contract (budget, no peeking) |
+| 6 | four-algorithm search comparison |
+| 7 | rank correlation, Pareto front, regret curve |
 
 It writes `results/reproduce_summary.txt` with the status and timing of every
 step. Use `--quick` for a faster capacity check, and

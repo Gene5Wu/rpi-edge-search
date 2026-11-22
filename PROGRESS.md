@@ -743,6 +743,65 @@ python scripts/make_figures.py --max-latency 400 --out results/cap400
 
 ---
 
+### Step 11 — Environment isolation and dependency pinning (completed this step)
+
+**Goal.** Make sure "it runs on my machine" cannot hide a missing dependency, and
+make the environment reproducible rather than "whatever pip resolves today".
+
+**Why a virtual environment.** Not because the code fails without one — the
+developer machine's Anaconda base already had all four packages — but precisely
+*because* it already had them: a global environment can mask a package that
+`requirements.txt` forgets to declare, and the course requires the repository to
+run on a fresh machine.
+
+**What was done.**
+
+1. Created `.venv` from the existing Python 3.11.7 and installed
+   `requirements.txt` into it.
+2. The install resolved to **newer major versions** than the ones used during
+   development:
+
+   | package | development | fresh install |
+   |---|---|---|
+   | numpy | 1.26.4 | **2.4.6** |
+   | pandas | 2.1.4 | **3.1.1** |
+   | matplotlib | 3.8.0 | **3.11.2** |
+   | PyYAML | 6.0.1 | 6.0.4 |
+
+3. Ran the full pipeline inside the new environment. It passes **7/7**, which is
+   the useful part of this step: it proves the code survives NumPy 2.x and
+   pandas 3.x, and that the `np.trapz` → `np.trapezoid` compatibility shim in
+   `src/nsc.py` was necessary rather than decorative.
+4. `requirements.txt` keeps loose lower bounds (quick start, more portable), so a
+   **`requirements-lock.txt`** was added with the exact resolved versions and the
+   transitive dependencies, for bit-for-bit reproduction.
+5. `README.md` gained an **Environment setup** section: activation commands for
+   PowerShell / Git Bash / Linux, the `ExecutionPolicy` workaround for PowerShell,
+   how to verify the install, and why `requirements-benchmark.txt` belongs in a
+   *second* environment (`.venv-bench`) so the core one stays minimal.
+
+**Commands run**
+
+```bash
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe scripts/reproduce.py --quick
+.\.venv\Scripts\python.exe -m pip freeze    # became requirements-lock.txt
+```
+
+**Result**
+
+```text
+overall: PASS  (7/7 steps, 11.2s)
+```
+
+**Notes.** `.venv/` and `.venv-bench/` are already covered by `.gitignore`. The
+interpreter floor is now stated explicitly as **Python 3.11+**, because the
+pinned NumPy does not build on older versions — worth knowing before the grader
+tries it on 3.9.
+
+---
+
 ## 4. Repository Map (current)
 
 ```text
@@ -750,6 +809,7 @@ rpi-edge-search/
 ├── README.md
 ├── PROGRESS.md                     <- this file
 ├── requirements.txt
+├── requirements-lock.txt           <- exact tested versions
 ├── requirements-benchmark.txt
 ├── .gitignore
 ├── configs/
@@ -801,6 +861,7 @@ rpi-edge-search/
 | S7 | One-command reproduction (`scripts/reproduce.py`) | **done** |
 | S8 | Raspberry Pi benchmark script + ONNX export | **done** (runs when hardware is attached) |
 | S9 | Four-page final report | **draft** (needs the hardware table) |
+| S11 | Environment isolation + dependency lock | **done** |
 
 ## 6. Open Questions
 
