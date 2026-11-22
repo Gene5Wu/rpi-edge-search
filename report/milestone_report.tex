@@ -3,18 +3,19 @@
 \usepackage{fontspec}
 \usepackage{setspace}
 \usepackage{amsmath,amssymb,booktabs}
+\usepackage{graphicx}
 \usepackage[hidelinks]{hyperref}
 \setmainfont{Times New Roman}
 \setstretch{1.0}
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{0.18em}
+\setlength{\parskip}{0.2em}
 
 \begin{document}
 \begin{center}
 {\Large\bfseries Milestone Report\par}
-\vspace{0.4em}
+\vspace{0.3em}
 {\large\bfseries Resource-Aware Heuristic Search for Edge Vision Deployment Configuration Selection\par}
-\vspace{0.4em}
+\vspace{0.3em}
 CS5491 Artificial Intelligence\\
 WU JUNYU (72655994, 72655994@cityu-dg.edu.cn)
 \end{center}
@@ -23,176 +24,157 @@ WU JUNYU (72655994, 72655994@cityu-dg.edu.cn)
 
 \section{Problem Description and Motivation}
 
-Deploying an object detector on a resource-constrained device involves a
-trade-off between detection accuracy, inference latency, and memory consumption.
-Testing every configuration is expensive, particularly on edge hardware. This
-project asks whether a resource-aware heuristic can identify a high-accuracy
-feasible deployment configuration within a limited evaluation budget.
+Deploying an object detector on a resource-constrained device involves a trade-off
+between detection accuracy, inference latency and memory consumption. Testing every
+configuration is expensive, particularly on edge hardware. This project asks whether a
+resource-aware heuristic can identify a high-accuracy feasible deployment configuration
+within a limited evaluation budget.
 
 Let \(x=(m,R,p,t)\) denote a configuration consisting of detector variant, input
-resolution, precision, and CPU thread count. Given a finite candidate space
+resolution, precision and CPU thread count. Given a finite candidate space
 \(\mathcal X\), the goal is
 \[
-\max_{x\in\mathcal X} A(x)
-\quad\text{subject to}\quad
-L(x)\le L_{\max},\qquad M(x)\le M_{\max},
+\max_{x\in\mathcal X} A(x)\quad\text{subject to}\quad L(x)\le L_{\max},\qquad M(x)\le M_{\max},
 \]
-where \(A\) denotes mAP@0.5, \(L\) median inference latency, and \(M\) peak
-process memory. A budget \(B\) limits the number of distinct configurations whose
-outcomes a search algorithm may query.
+where \(A\) is mAP@0.5, \(L\) median inference latency and \(M\) peak process memory. A
+budget \(B\) limits how many distinct configurations may be queried during search.
 
-The project is \emph{inspired by} the course topic on Neural Spectral Capacity
-(NSC), which uses an inexpensive specification-based score for candidate
-selection. Here that idea is adapted to deployment configurations rather than
-Transformer architecture design. The claim under test is deliberately narrow: the
-score is a heuristic for \emph{ranking and selection}, not a validated predictor
-of trained accuracy.
+The project is \emph{inspired by} the course topic on Neural Spectral Capacity (NSC),
+which uses an inexpensive specification-based score to select candidates. Here that idea
+is adapted to deployment configurations rather than Transformer architecture design. The
+claim under test is deliberately narrow: the score is a heuristic for \emph{ranking and
+selection}, not a validated predictor of accuracy.
 
 \section{Method Design}
 
-\textbf{Configuration space.}
-The space contains YOLOv5n, YOLOv5s, and YOLOv5m, resolutions 320, 416, and 640,
-FP32 and INT8 precision, and 1, 2, or 4 CPU threads, giving 54 configurations
-(27 when restricted to FP32). Multiple model variants are required: the capacity
-term is an architecture quantity, so with a single architecture it would be
-constant and could not rank anything. The first measured campaign will prioritize
-the 27 FP32 configurations; INT8 remains an extension.
+\textbf{Configuration space.} YOLOv5n, YOLOv5s and YOLOv5m; resolutions 320, 416 and
+640; FP32 and INT8; 1, 2 or 4 CPU threads, giving 54 configurations (27 when restricted
+to FP32). Multiple variants are required because the capacity term is an
+\emph{architecture} quantity: with a single architecture it would be constant and could
+not rank anything. FP32 is measured first; INT8 remains an extension.
 
-\textbf{Resource-aware heuristic.}
-An NSC-inspired capacity term \(C(m)\) is computed from the convolution weight
-matrix shapes using a numerical Marchenko--Pastur approximation. The accuracy
-proxy is
+\textbf{Resource-aware heuristic.} An NSC-inspired capacity term \(C(m)\) is computed
+from the convolution weight-matrix shapes through a numerical Marchenko--Pastur
+approximation. The accuracy proxy and the composite score are
 \[
-\widehat A(x)=C(m)\,(R/640)^{\alpha}\,q(p),
+\widehat A(x)=C(m)\left(\frac{R}{640}\right)^{\alpha}q(p),
+\qquad
+S(x)=\frac{\widehat A(x)}{\max_{z}\widehat A(z)}-\lambda P_L(x)-\mu P_M(x)-\eta T(x),
 \]
-and the composite score is
-\[
-S(x)=\frac{\widehat A(x)}{\max_{z\in\mathcal X}\widehat A(z)}
-      -\lambda P_L(x)-\mu P_M(x)-\eta T(x),
-\]
-where \(P_L\) and \(P_M\) are predicted relative constraint violations clipped at
-one, and \(T\) normalizes predicted latency and memory by their candidate-pool
-maxima. Latency is estimated from convolution MACs and thread count; memory from
-weights, activation size, and runtime overhead. The current assumptions are
-\(\alpha=1\), \(q(\mathrm{FP32})=1\), \(q(\mathrm{INT8})=0.97\),
-\(\lambda=\mu=1\), and \(\eta=0.05\). These are modelling assumptions, not
-empirically fitted constants; the resource model exposes a refit procedure that
-will be applied once measurements exist.
+where \(P_L,P_M\) are predicted relative constraint violations clipped at one and \(T\)
+normalises predicted latency and memory by their pool maxima. Latency is estimated from
+convolution MACs and thread count; memory from weights, activation size and a runtime
+baseline. Current assumptions: \(\alpha=1\), \(q(\mathrm{FP32})=1\),
+\(q(\mathrm{INT8})=0.97\), \(\lambda=\mu=1\), \(\eta=0.05\). The resource model also
+exposes a refit procedure for measured data.
 
-\textbf{Search and evaluation.}
-Random search samples without replacement. Greedy local search uses observed
-outcomes and local neighbours. The proposed best-first method orders its frontier
-by \(S(x)\) and never reads the outcome of an unevaluated configuration; the
-evaluator enforces this by raising an error for unmeasured rows. Exhaustive
-enumeration gives the feasible oracle and is not a budget-matched baseline. The
-evaluator counts distinct queries and caches repeats, so the budget reflects
-distinct evaluations.
+\textbf{Search and evaluation.} Random search samples without replacement. Greedy local
+search moves to the best \emph{observed} neighbour. The proposed best-first method orders
+its frontier by \(S(x)\) and never reads the outcome of an unevaluated configuration --
+the evaluator enforces this by raising an error for unmeasured rows. Exhaustive
+enumeration gives the feasible oracle and is not a budget-matched baseline. The evaluator
+counts distinct queries and caches repeats.
 
-The primary metrics are best feasible accuracy and regret
-\(A^*-A_{\mathrm{best}}\). Because two of the algorithms are stochastic, the
-constrained comparison is reported over 30 random seeds as mean and standard
-deviation, together with the fraction of runs that found at least one feasible
-configuration. Rank correlation, the accuracy--latency Pareto front, and
-ablations of the capacity and resource terms complete the analysis.
+Primary metrics are best feasible accuracy and regret \(A^*-A_{\mathrm{best}}\). Because
+two algorithms are stochastic, results are reported over 30 random seeds as mean and
+standard deviation, together with the fraction of runs that found at least one feasible
+configuration.
 
 \section{Implementation Progress and Preliminary Results}
 
-The configuration generator, capacity calculation, resource model, scoring
-function, budgeted evaluator, four search algorithms, metrics, figure generation
-and a multi-seed driver are implemented. A single command,
-\texttt{python scripts/reproduce.py}, runs the whole pipeline and currently
-reports \textbf{8/8 checks passing}.
+The configuration generator, capacity calculation, resource model, scoring function,
+budgeted evaluator, four search algorithms, metrics, figure generation, COCO evaluation
+and a multi-seed driver are implemented. \texttt{python scripts/reproduce.py} runs the
+whole pipeline and currently reports \textbf{8/8 checks passing}.
 
-\textbf{Benchmark status.} All results below use
-\texttt{benchmarks/synthetic\_demo.csv}, a deterministic synthetic table of 54
-rows. \emph{These are simulated outcomes, not measured COCO accuracy or Raspberry
-Pi performance.} The synthetic truth is generated from partly related analytic
-assumptions, so it can favour the heuristic; every figure and table derived from
-it is labelled \emph{simulated}. The planned measurement campaign will use a
-fixed COCO 2017 validation subset with ONNX Runtime CPU inference.
+\textbf{Measured benchmark.} Accuracy is evaluated on a \emph{fixed} subset of the COCO
+2017 validation set: the 100 images with the smallest image ids (714 ground-truth
+instances), letterboxed to a square input, with per-class NMS at IoU 0.65 and confidence
+0.001, scored by pycocotools. Every configuration sees exactly the same images. Latency
+and peak memory are measured with ONNX Runtime on the CPU of a laptop, each configuration
+in its own process so a large model cannot inflate later readings. The table currently
+covers YOLOv5n and YOLOv5s at three resolutions and three thread counts
+(18 configurations); YOLOv5m is not yet measured.
 
 \begin{center}
-\begin{tabular}{@{}llrrrr@{}}
+\begin{tabular}{@{}lrrrrrr@{}}
 \toprule
-Scenario & Budget & Random & Greedy & Heuristic & Oracle \\
+Model & mAP@0.5 (320) & (416) & (640) & Latency 640 (ms) & Peak mem.\ (MB) & Params \\
 \midrule
-No resource cap & 4  & 0.4561 & 0.4306 & 0.5503 & 0.5503 \\
-No resource cap & 8  & 0.5110 & 0.5110 & 0.5503 & 0.5503 \\
-No resource cap & 12 & 0.5206 & 0.5353 & 0.5503 & 0.5503 \\
+YOLOv5n & 0.4607 & 0.4918 & 0.5193 & 22.0 & 146.8 & 1.87M \\
+YOLOv5s & 0.5977 & 0.6331 & 0.6789 & 49.4 & 178.9 & 7.24M \\
 \bottomrule
 \end{tabular}
 
-\small Table 1. Best feasible simulated mAP@0.5, single run, seed 0.
+\small Table 1. Measured COCO mAP@0.5 and measured cost (4 threads, laptop CPU).
 \end{center}
 
-Without resource constraints the heuristic reaches the synthetic oracle with four
-queries, while random and greedy need far more.
+Accuracy rises monotonically with resolution and with model size; latency rises roughly
+quadratically with resolution, which is the trade-off the search exploits.
 
-The constrained picture is different, and it is reported as a distribution rather
-than a single run. With a 400 ms latency cap, 22 of the 54 configurations are
-feasible and the oracle accuracy is 0.4505.
+\textbf{Fixed-budget selection.} With a 25 ms latency cap, 10 of the 18 measured
+configurations are feasible and the feasible oracle is 0.6331 (YOLOv5s at 416 pixels).
 
 \begin{center}
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
-Method & Budget 4 & Budget 8 & Budget 12 & Feas.\ success \\
+Method & Budget 4 & Budget 8 & Budget 12 & Feasible success \\
 \midrule
-Random            & 0.3944 \(\pm\) 0.0394 & 0.4088 \(\pm\) 0.0328 & 0.4171 \(\pm\) 0.0303 & 0.90 / 1.00 / 1.00 \\
-Greedy            & 0.3810 \(\pm\) 0.0000 & 0.3952 \(\pm\) 0.0244 & 0.4143 \(\pm\) 0.0307 & 1.00 / 1.00 / 1.00 \\
-Heuristic (full)  & 0.4223 & 0.4223 & 0.4223 & 1.00 / 1.00 / 1.00 \\
-Heuristic (no capacity term) & 0.3864 & 0.4420 & \textbf{0.4505} & 1.00 / 1.00 / 1.00 \\
+Random                    & 0.5737 \(\pm\) 0.0565 & 0.5993 \(\pm\) 0.0441 & 0.6178 \(\pm\) 0.0284 & 0.97 / 1.00 / 1.00 \\
+Greedy                    & 0.5977 \(\pm\) 0.0000 & 0.6083 \(\pm\) 0.0162 & 0.6213 \(\pm\) 0.0167 & 1.00 / 1.00 / 1.00 \\
+Heuristic (full)          & \textbf{0.6331} & \textbf{0.6331} & \textbf{0.6331} & 1.00 / 1.00 / 1.00 \\
+Heuristic (no capacity)   & 0.4918 & 0.5193 & 0.6331 & 1.00 / 1.00 / 1.00 \\
 \bottomrule
 \end{tabular}
 
-\small Table 2. Simulated best feasible mAP@0.5 under a 400 ms cap, 30 seeds for
-the stochastic methods (mean \(\pm\) standard deviation) and one deterministic run
-for the heuristic. Oracle: 0.4505. Feasible-success rate is given per budget.
+\small Table 2. Measured best feasible mAP@0.5 under a 25 ms cap, 30 seeds for the
+stochastic methods (mean \(\pm\) std). Oracle: 0.6331.
 \end{center}
 
-Two observations drive the next stage. First, the heuristic is better than or
-equal to both baselines at every budget, but its margin over random search
-(mainly 0.4223 against 0.4171 at budget 12) is far smaller than in the
-unconstrained setting, so the earlier advantage does not transfer automatically
-into the constrained regime. Second, and more importantly, \textbf{removing the
-capacity term altogether reaches the oracle accuracy} (0.4505) at budget 12.
-On this synthetic table the capacity term is therefore not what produces the
-constrained improvement.
+\begin{center}
+\includegraphics[width=0.60\textwidth]{fig_pareto.png}
 
-The ranking evidence points the same way. In the unconstrained pool the full
-score has a Spearman correlation of 0.7457 with simulated accuracy. Under the
-latency cap its correlation within the feasible subset is 0.6556, against 0.6411
-without the resource terms and 0.8534 for predicted MACs alone. A simpler
-compute-cost proxy therefore ranks better than the composite score here, which
-motivates including a MAC-based baseline in the real comparison rather than
-treating the composite score as the strongest available signal.
+\small Figure 1. Measured accuracy against measured latency over the configuration space.
+\end{center}
+
+\textbf{Interpretation.} Three observations stand out. First, the heuristic reaches the
+feasible optimum with \emph{four} evaluations at every budget, whereas random search is
+still 0.015 short after twelve and greedy needs eight. Second, removing the capacity term
+is clearly harmful at small budgets (0.4918 against 0.6331 at budget 4), so the
+architecture term is doing real work on measured data -- unlike on the synthetic table
+used earlier for development, where the ablation reached the optimum. Third, rank
+correlation over the measured pool agrees: the full score reaches Spearman \(\rho=0.9875\)
+against measured accuracy, the score without the capacity term drops to \(\rho=-0.9499\),
+and predicted MACs alone reach \(0.9429\). The capacity term is therefore the ingredient
+that carries the accuracy signal, while the resource terms are what make a configuration
+\emph{selectable} under a cap.
 
 \section{Reproducibility and Next Steps}
 
-The current pipeline runs on an ordinary laptop:
 \begin{verbatim}
 pip install -r requirements.txt
-python scripts/reproduce.py
-python scripts/run_multiseed.py --max-latency 400 --seeds 30
-python scripts/reproduce.py --table benchmarks/<measured>.csv --precisions fp32
+python scripts/reproduce.py --table benchmarks/laptop_fp32.csv --precisions fp32
+python scripts/run_multiseed.py --table benchmarks/laptop_fp32.csv \
+       --precisions fp32 --max-latency 25 --seeds 30
 \end{verbatim}
-The scripts generate ranking tables, regret curves, Pareto plots, multi-seed
-summaries, and a reproduction summary, without downloading models or requiring a
-Raspberry Pi. An FP32-only measured table is a valid benchmark; tools analyse the
-covered subset rather than requiring INT8.
 
-The next stage will (1) implement a fixed COCO subset and a real mAP evaluation
-with an explicit preprocessing and NMS protocol, (2) collect FP32 latency and
-peak-memory measurements on a laptop with isolated per-configuration processes,
-(3) repeat the budgeted comparison over multiple seeds including a MAC-based
-baseline and the ablations, and (4) examine latency and memory constraints
-jointly. Raspberry Pi 4B validation follows the laptop benchmark; INT8 stays an
-extension until quantized models can be evaluated.
+The measured table is committed, so the search experiments and every figure reproduce on
+an ordinary computer without a GPU, without downloading a model and without a Raspberry
+Pi. Regenerating the measurements is a separate optional path: build the fixed COCO
+subset, export the ONNX models and run the two measurement scripts.
 
-Two limitations bound these claims. The synthetic benchmark is generated from
-assumptions related to the score itself, so it may favour the heuristic and says
-nothing about real deployment selection. The analytic architecture specification
-also reproduces only 80--84\% of the published parameter counts; the compute
-match (93--94\% of published GFLOPs) validates the latency model, but exported
-ONNX graphs must be checked before the two are treated as the same network.
+\textbf{Next steps.} (1) Add YOLOv5m and INT8 to the measured table; (2) enlarge the COCO
+subset to reduce the sampling noise in the accuracy estimates; (3) add a pure MAC-based
+baseline, since predicted MACs already rank competitively and the report must answer why
+the capacity term is needed on top of a cheaper proxy; (4) examine joint latency and
+memory constraints; (5) validate the selected configurations on a Raspberry Pi 4B.
+
+\textbf{Limitations.} The accuracy numbers come from 100 images, so confidence intervals
+are wide and the absolute mAP is not comparable to full-COCO figures. Latency and memory
+were measured on a laptop, not on the target ARM device, so the absolute values do not
+transfer; only the ranking is used. The analytic architecture specification reproduces
+about 84\% of the v7.0 parameter count (94\% of the published GFLOPs); the compute match validates
+the latency model, and the export is checked against the analytic specification whenever
+the model changes.
 
 \end{document}

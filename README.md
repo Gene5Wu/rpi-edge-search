@@ -58,7 +58,8 @@ rpi-edge-search/
 ├── benchmarks/
 │   ├── README.md                 # table schema and rules
 │   ├── synthetic_demo.csv        # placeholder, pipeline testing only
-│   └── pi4b_2gb_reference.csv    # real measurements (added after the Pi run)
+│   ├── laptop_fp32.csv           # MEASURED: 18 configs, COCO mAP + latency
+│   └── pi4b_2gb_reference.csv    # Raspberry Pi measurements (later)
 ├── models/
 │   ├── README.md
 │   └── download_models.py        # optional ONNX export
@@ -76,6 +77,8 @@ rpi-edge-search/
 │   ├── run_multiseed.py          # mean/std/feasible-success over 30 seeds
 │   ├── make_figures.py
 │   ├── make_synthetic_benchmark.py
+│   ├── prepare_coco_subset.py     # fixed COCO val subset
+│   ├── evaluate_accuracy.py       # mAP via pycocotools
 │   └── benchmark_pi.py           # optional hardware step
 └── src/
     ├── search_space.py           # pool enumeration

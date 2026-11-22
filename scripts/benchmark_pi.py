@@ -106,17 +106,29 @@ def peak_rss_mb() -> float:
     except ImportError:
         pass
 
-    try:  # Windows
-        counters = _ProcessMemoryCounters()
-        counters.cb = ctypes.sizeof(_ProcessMemoryCounters)
-        process = ctypes.windll.kernel32.GetCurrentProcess()
-        ok = ctypes.windll.psapi.GetProcessMemoryInfo(
-            process, ctypes.byref(counters), counters.cb
-        )
-        if ok:
-            return counters.PeakWorkingSetSize / 1e6
-    except Exception:  # pragma: no cover - best effort only
-        pass
+    if platform.system() == "Windows":
+        try:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            psapi = ctypes.WinDLL("psapi", use_last_error=True)
+
+            # GetCurrentProcess returns a HANDLE; without an explicit restype
+            # ctypes assumes a 32-bit int and truncates the pseudo-handle, which
+            # makes the memory query fail silently.
+            kernel32.GetCurrentProcess.restype = ctypes.wintypes.HANDLE
+            process = kernel32.GetCurrentProcess()
+
+            counters = _ProcessMemoryCounters()
+            counters.cb = ctypes.sizeof(_ProcessMemoryCounters)
+
+            query = psapi.GetProcessMemoryInfo
+            query.argtypes = [ctypes.wintypes.HANDLE,
+                              ctypes.POINTER(_ProcessMemoryCounters),
+                              ctypes.wintypes.DWORD]
+            query.restype = ctypes.wintypes.BOOL
+            if query(process, ctypes.byref(counters), counters.cb):
+                return counters.PeakWorkingSetSize / 1e6
+        except OSError:  # pragma: no cover - defensive
+            pass
 
     return float("nan")
 

@@ -1,6 +1,21 @@
-# OPTIONAL dependencies, only needed to *regenerate* hardware measurements
-# (scripts/benchmark_pi.py). The core experiments and every figure/table in
-# the report can be reproduced from the archived benchmark table without these.
-onnxruntime>=1.16
+# OPTIONAL dependencies, only needed to *regenerate* measurements:
+#   - scripts/prepare_coco_subset.py   (dataset)
+#   - scripts/evaluate_accuracy.py     (mAP)
+#   - scripts/benchmark_pi.py          (latency / memory)
+# The core experiments and every figure/table can be reproduced from the
+# archived benchmark table without these.
+#
+# Pinned deliberately:
+#   onnxruntime 1.32 segfaults on import in this environment (Windows + the
+#   Anaconda CPython 3.11 build); 1.18.1 is the version the measurements were
+#   produced with.
+#   NumPy must stay on 1.x here: onnxruntime 1.18's bindings are built against
+#   the 1.x ABI. This is why the benchmark environment is separate from the
+#   core one, which uses NumPy 2.x.
+onnxruntime==1.18.1
 opencv-python>=4.8
 pycocotools>=2.0.7
+numpy<2
+
+# Model export additionally needs torch and the ONNX toolchain:
+#   pip install torch onnx onnxscript

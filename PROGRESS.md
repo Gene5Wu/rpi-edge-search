@@ -907,6 +907,85 @@ constrained comparison over 30 seeds instead of a single run.
 
 ---
 
+### Step 13 — Real COCO benchmark and first measured results (completed this step)
+
+The repository previously contained only a synthetic table; the milestone requires
+evaluation on the chosen benchmark. This step builds that path and runs it.
+
+**Files created**
+
+| File | Purpose |
+|---|---|
+| `scripts/prepare_coco_subset.py` | Downloads a **fixed** COCO val2017 subset (images sorted by id, first N) plus its filtered annotations; resume-capable downloader |
+| `scripts/evaluate_accuracy.py` | Letterbox → ONNX inference → per-class NMS → pycocotools mAP |
+| `benchmarks/laptop_fp32.csv` | **Measured** benchmark table (18 configurations) |
+
+**Problems found and fixed while doing this.**
+
+1. `ultralytics.YOLO("yolov5n.pt")` silently resolves to **YOLOv5u** (anchor-free,
+   2.64M parameters) rather than v7.0 (1.87M). The exported graph therefore did
+   not match `src/model_spec.py`. `check_model_spec.py` caught it
+   (`ratio 0.596 [MISMATCH]`) and the exporter was rewritten to build the v7.0
+   model from the `ultralytics/yolov5` hub repository, which yields
+   **1,872,157 parameters and 4.6 GFLOPs** — the published figures.
+2. The COCO annotation archive aborted at 193/253 MB twice; the downloader now
+   resumes with `Range` requests and retries.
+3. `import onnxruntime` **segfaults** with version 1.32 on this Anaconda/Windows
+   build. Pinned to 1.18.1 in `requirements-benchmark.txt`, which also pins
+   `numpy<2` because that ORT build is compiled against the 1.x ABI — the reason
+   the benchmark environment is separate from the core one.
+4. `peak_rss_mb()` returned `nan` on Windows: `GetCurrentProcess` defaults to a
+   32-bit return type, truncating the handle, so the memory query silently
+   failed. Fixed with explicit `argtypes`/`restype`.
+
+**Measured protocol.** 100 COCO val2017 images (smallest ids, 714 instances);
+letterbox; per-class NMS, IoU 0.65, confidence 0.001; pycocotools; ONNX Runtime
+CPU, one process per configuration; 60 timed images, 2 warm-up, 2 repeats.
+
+**Results.**
+
+```text
+              mAP@0.5            latency@640   peak mem
+model    320     416     640      (4 threads)   (MB)
+yolov5n  0.4607  0.4918  0.5193     22.0 ms     146.8
+yolov5s  0.5977  0.6331  0.6789     49.4 ms     178.9
+```
+
+Under a 25 ms latency cap (10 of 18 feasible, oracle 0.6331), 30 seeds:
+
+```text
+ budget             algorithm  acc mean  acc std  regret mean
+      4                random    0.5737   0.0565       0.0594
+      4                greedy    0.5977   0.0000       0.0354
+      4        heuristic/full    0.6331        -       0.0000
+      4 heuristic/no_capacity    0.4918        -       0.1413
+      8                random    0.5993   0.0441       0.0338
+      8                greedy    0.6083   0.0162       0.0248
+      8        heuristic/full    0.6331        -       0.0000
+      8 heuristic/no_capacity    0.5193        -       0.1138
+     12                random    0.6178   0.0284       0.0153
+     12                greedy    0.6213   0.0167       0.0118
+     12        heuristic/full    0.6331        -       0.0000
+     12 heuristic/no_capacity    0.6331        -       0.0000
+```
+
+**What this changes.** On *measured* data the story is the opposite of the
+synthetic table: the capacity term now matters (ablating it costs 0.14 regret at
+budget 4), and the heuristic reaches the feasible optimum with four evaluations
+while random search is still 0.015 short after twelve. Rank correlation agrees —
+the full score reaches Spearman ρ = 0.9875 against measured accuracy, the
+no-capacity ablation collapses to ρ = −0.9499, and predicted MACs reach 0.9429
+(so a MAC baseline is now clearly required in the final comparison).
+
+`reproduce.py --table benchmarks/laptop_fp32.csv --precisions fp32` runs
+**8/8 PASS** on the measured table, with no synthetic warning.
+
+**Not yet measured.** YOLOv5m (weight download failed repeatedly) and INT8. The
+measured pool is 18 of 54 configurations; the coverage-aware tooling handles that
+without changes.
+
+---
+
 ## 4. Repository Map (current)
 
 ```text
