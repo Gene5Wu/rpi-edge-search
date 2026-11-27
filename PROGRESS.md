@@ -986,6 +986,64 @@ without changes.
 
 ---
 
+### Step 14 — Where does the ranking signal come from? (completed this step)
+
+The milestone report left one question open, and it is the question the final
+report has to answer: **predicted MACs reach a rank correlation of 0.943 on their
+own -- so what does the NSC capacity term add?**
+
+**What was built.**
+
+| File | Purpose |
+|---|---|
+| `src/score.py` | `ScoreWeights.proxy` selects the accuracy proxy: `nsc` (this project's proposal), `macs` (free compute proxy), `params` (cheapest possible proxy) |
+| `scripts/compare_proxies.py` | Runs the heuristic with each proxy, plus random and greedy, over three constraint scenarios and three budgets; also reports each proxy's rank correlation |
+
+**Results** (measured table, 18 configurations, 30 seeds):
+
+```text
+--- unconstrained           feasible 18/18   oracle 0.6789 ---
+    rank correlation: nsc=1.000  macs=0.943  params=0.878
+ budget    random    greedy   heur[nsc]  heur[macs]  heur[params]
+      4    0.6532    0.6331      0.6789      0.6789        0.6331
+      8    0.6774    0.6789      0.6789      0.6789        0.6789
+     12    0.6789    0.6789      0.6789      0.6789        0.6789
+
+--- latency 25ms            feasible 10/18   oracle 0.6331 ---
+      4    0.5737    0.5977      0.6331      0.6331        0.6331
+      8    0.5993    0.6083      0.6331      0.6331        0.6331
+     12    0.6178    0.6213      0.6331      0.6331        0.6331
+
+--- latency 25ms + memory 140MB   feasible 9/18   oracle 0.6331 ---
+      4    0.5716    0.5977      0.6331      0.6331        0.6331
+```
+
+**The honest finding.** `heur[macs]` ties `heur[nsc]` at every budget under every
+constraint. The NSC term does rank strictly better (ρ = 1.000 against 0.943), but
+on an 18-configuration pool the search reaches the same optimum either way, so
+selection cannot separate them. The only proxy that is clearly worse is
+`params` (0.6331 instead of 0.6789 at budget 4), because it is blind to
+resolution.
+
+This is recorded as a limitation, not smoothed over: on this benchmark the
+project's central ingredient has **not** demonstrated an advantage over a free
+compute proxy. What it *has* demonstrated is that the resource-aware search
+framework turns any of these proxies into a large improvement over random
+search.
+
+**Why the pool is only 18.** YOLOv5m belongs in the space and its checkpoint was
+obtained (42.8 MB), but exporting it to ONNX is blocked by an environment
+conflict: `torch` is built against the NumPy 2 C-API while `onnxruntime` 1.18
+(needed because 1.32 segfaults here) is built against NumPy 1. Swapping NumPy
+between export and measurement is defeated by `pandas 2.1`'s own NumPy pin. The
+clean fix is a third environment used only for export; that is tracked, not done.
+
+**Next step arising from this.** A larger pool, not a better score, is what
+would let the comparison separate the proxies: more detectors or more
+resolutions, and INT8. That is now the highest-value remaining experiment.
+
+---
+
 ## 4. Repository Map (current)
 
 ```text

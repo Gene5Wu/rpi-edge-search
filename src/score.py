@@ -64,10 +64,20 @@ class ScoreWeights:
     penalty_cap: float = 1.0
     #: Ablation switch: "full", "no_resource", or "no_capacity".
     ablation: str = "full"
+    #: Which cheap quantity stands in for accuracy when ranking candidates:
+    #:   "nsc"    -- the NSC capacity term scaled by resolution and precision
+    #:               (this project's proposal),
+    #:   "macs"   -- predicted multiply-accumulates, a free compute proxy,
+    #:   "params" -- parameter count, the cheapest possible proxy.
+    #: The first is only worth its extra machinery if it beats the other two on
+    #: measured data; ``scripts/compare_proxies.py`` runs that comparison.
+    proxy: str = "nsc"
 
     def __post_init__(self) -> None:
         if self.ablation not in ("full", "no_resource", "no_capacity"):
             raise ValueError(f"unknown ablation mode {self.ablation!r}")
+        if self.proxy not in ("nsc", "macs", "params"):
+            raise ValueError(f"unknown accuracy proxy {self.proxy!r}")
 
 
 def architectural_capacity(model: str, init_std: float = DEFAULT_INIT_STD) -> float:
@@ -96,6 +106,10 @@ class Scorer:
         self._capacity: Dict[str, float] = {
             model: architectural_capacity(model, init_std) for model in VARIANTS
         }
+        self._params: Dict[str, float] = {
+            model: float(sum(matrix.params for matrix in build_variant(model)[0]))
+            for model in VARIANTS
+        }
         self._resources: Dict[str, Dict[str, float]] = {
             config.config_id: self.resource_model.estimate(config) for config in configs
         }
@@ -103,10 +117,24 @@ class Scorer:
 
     # -- internals ---------------------------------------------------------
     def _accuracy_proxy(self, config) -> float:
-        base = self._capacity[config.model]
-        resolution_scale = (config.resolution / REFERENCE_RESOLUTION) ** self.weights.alpha
-        quant_scale = 1.0 if config.precision == "fp32" else self.weights.int8_retention
-        return base * resolution_scale * quant_scale
+        """The cheap stand-in for accuracy; which one is set by ``weights.proxy``."""
+        mode = self.weights.proxy
+
+        if mode == "nsc":
+            base = self._capacity[config.model]
+            resolution_scale = (config.resolution / REFERENCE_RESOLUTION) ** self.weights.alpha
+            quant_scale = 1.0 if config.precision == "fp32" else self.weights.int8_retention
+            return base * resolution_scale * quant_scale
+
+        if mode == "macs":
+            # Predicted compute already scales with resolution, so no extra factor.
+            return float(self._resources[config.config_id]["macs"])
+
+        if mode == "params":
+            # Architecture only: blind to resolution and precision on purpose.
+            return self._params[config.model]
+
+        raise ValueError(f"unknown accuracy proxy {mode!r}")
 
     def _compute_reference(self, configs: Sequence) -> Dict[str, float]:
         proxies = [self._accuracy_proxy(c) for c in configs]

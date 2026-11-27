@@ -75,6 +75,7 @@ rpi-edge-search/
 │   ├── try_evaluator.py
 │   ├── run_search.py
 │   ├── run_multiseed.py          # mean/std/feasible-success over 30 seeds
+│   ├── compare_proxies.py        # NSC vs MACs vs params as accuracy proxy
 │   ├── make_figures.py
 │   ├── make_synthetic_benchmark.py
 │   ├── prepare_coco_subset.py     # fixed COCO val subset
