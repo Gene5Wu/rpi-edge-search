@@ -369,11 +369,18 @@ def main(argv=None) -> int:
         print("ERROR: nothing measured (no model files found).", file=sys.stderr)
         return 1
 
-    import pandas as pd
+    # Written with the standard library on purpose: the measurement script then
+    # needs only onnxruntime, numpy and OpenCV, which keeps the Raspberry Pi
+    # installation small and less likely to fail.
+    import csv
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).to_csv(out, index=False)
+    with out.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
     print(f"\nwrote {len(rows)} rows to {out} (source={source})")
     return 0
 
